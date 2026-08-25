@@ -41,6 +41,45 @@ const MAX_RECONNECTS = 3
 /** Backoff base: reconnect delays are 1s, 2s, 4s. */
 const RECONNECT_BASE_MS = 1000
 
+/** Terminal background opacity (0.7 = 70% opaque; the panel/skin shows at 30%). */
+const TERMINAL_BG_OPACITY = 0.7
+
+/**
+ * The terminal background follows the active theme: resolve the
+ * `--dsw-alias-bg-base` token and re-emit it with TERMINAL_BG_OPACITY.
+ * getComputedStyle on a probe normalizes var() to a concrete color, and a
+ * 1×1 canvas normalizes any color syntax (hex / oklch / named) to rgb() so
+ * the alpha can be replaced reliably.
+ */
+function terminalThemeBackground(opacity: number): string {
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') {
+    return 'rgba(11, 14, 20, ' + opacity + ')'
+  }
+  const probe = document.createElement('div')
+  probe.style.position = 'fixed'
+  probe.style.left = '-9999px'
+  probe.style.background = 'var(--dsw-alias-bg-base)'
+  document.body.appendChild(probe)
+  try {
+    const resolved = getComputedStyle(probe).backgroundColor
+    const canvas = document.createElement('canvas')
+    canvas.width = 1
+    canvas.height = 1
+    const context = canvas.getContext('2d')
+    if (context === null) return 'rgba(11, 14, 20, ' + opacity + ')'
+    context.fillStyle = resolved
+    const normalized = context.fillStyle
+    const match = /^rgba?\(([^)]+)\)$/.exec(normalized)
+    if (match !== null) {
+      const channels = match[1].split(',').map(channel => channel.trim())
+      return 'rgba(' + channels[0] + ', ' + channels[1] + ', ' + channels[2] + ', ' + opacity + ')'
+    }
+  } finally {
+    probe.remove()
+  }
+  return 'rgba(11, 14, 20, ' + opacity + ')'
+}
+
 /** The terminal session lifecycle state shown in the status banner. */
 type SessionStatus = 'connecting' | 'connected' | 'exited'
 
@@ -266,10 +305,10 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
       cursorBlink: true,
       fontSize: 13,
       fontFamily: resolveTerminalFontFamily(fontOverride),
-      // Semi-transparent terminal background (75% opaque): the panel behind
-      // shows through at 25% (allowTransparency enables rgba theme colors).
+      // Semi-transparent terminal background: the active theme's base color
+      // at 70% opacity (allowTransparency enables rgba theme colors).
       allowTransparency: true,
-      theme: { background: 'rgba(11, 14, 20, 0.75)', foreground: '#d8dee9', cursor: '#a3b8d0' },
+      theme: { background: terminalThemeBackground(TERMINAL_BG_OPACITY), foreground: '#d8dee9', cursor: '#a3b8d0' },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

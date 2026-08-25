@@ -984,8 +984,9 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
   overflow: hidden;
-  /* 75% opaque so the panel behind shows through at 25%. */
-  background: rgba(11, 14, 20, 0.75);
+  /* Transparent container: the xterm canvas itself carries the theme color
+     at TERMINAL_BG_OPACITY, so the panel/skin behind shows through. */
+  background: transparent;
 }
 
 .termContainer {
