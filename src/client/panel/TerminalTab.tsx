@@ -266,7 +266,10 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
       cursorBlink: true,
       fontSize: 13,
       fontFamily: resolveTerminalFontFamily(fontOverride),
-      theme: { background: '#0b0e14', foreground: '#d8dee9', cursor: '#a3b8d0' },
+      // Semi-transparent terminal background (75% opaque): the panel behind
+      // shows through at 25% (allowTransparency enables rgba theme colors).
+      allowTransparency: true,
+      theme: { background: 'rgba(11, 14, 20, 0.75)', foreground: '#d8dee9', cursor: '#a3b8d0' },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
