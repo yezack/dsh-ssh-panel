@@ -230,7 +230,7 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
 }
 
 .controls .input,
-.controls .select {
+.controls .pSelect {
   flex: 0 1 260px;
   min-width: 150px;
 }
@@ -255,12 +255,20 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* Unified native <select> (hosts grouping, terminal/transfer/tunnel host
-   pickers): one look across every tab. color-scheme drives the UA dropdown
-   panel, so the popup follows the active theme instead of staying white in
-   dark mode (the app marks dark via body[data-ds-dark-theme] and sets the
-   root color-scheme; this pins both explicitly). */
-.select {
+/* Unified custom dropdown (PanelSelect): the trigger box looks like the
+   jump-host combobox trigger; the menu reuses .jumpMenu/.jumpOption so every
+   dropdown in the panel shares one themed look (native <select> popups are
+   UA-palette and cannot match the app theme). */
+.pSelect {
+  position: relative;
+}
+
+.pSelectBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
   padding: 6px 10px;
   font-size: 13px;
   color: var(--dsw-alias-label-primary);
@@ -270,15 +278,30 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   outline: none;
   font-family: inherit;
   cursor: pointer;
-  color-scheme: light;
 }
 
-.select:focus {
+.pSelectBox:hover,
+.pSelectBox[data-open] {
   border-color: var(--dsw-alias-state-business-primary);
 }
 
-body[data-ds-dark-theme] .select {
-  color-scheme: dark;
+.pSelectValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pSelectPlaceholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pSelectChevron {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* --- host groups (#379) ------------------------------------------------------- */

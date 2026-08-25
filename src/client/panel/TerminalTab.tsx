@@ -12,6 +12,7 @@ import type { SshApi, TerminalConnection } from '../api.ts'
 import type { SshHostSummary } from '../../protocol.ts'
 import { XTERM_CSS } from './xterm.css.ts'
 import { errorMessage, resolveTerminalFontFamily, tt, type TerminalFontSource } from './helpers.ts'
+import { PanelSelect } from './Select.tsx'
 import css from './panel.module.css'
 
 /** Terminal tab props. */
@@ -220,10 +221,15 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   return (
     <div className={css.termBody}>
       <div className={css.controls}>
-        <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
-          <option value="">{tt('terminal.selectHost')}</option>
-          {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>)}
-        </select>
+        <PanelSelect
+          ariaLabel={tt('terminal.selectHost')}
+          value={alias}
+          onChange={setAlias}
+          options={[
+            { value: '', label: tt('terminal.selectHost') },
+            ...hosts.map(host => ({ value: host.alias, label: host.alias + ' (' + host.host + ')' })),
+          ]}
+        />
         <button type="button" className={css.primaryButton} disabled={alias === '' || active} onClick={connect}>{tt('terminal.connect')}</button>
         <button type="button" className={css.ghostButton} disabled={!active} onClick={disconnect}>{tt('terminal.disconnect')}</button>
       </div>

@@ -93,8 +93,10 @@ describe('TerminalTab terminal font (#577)', () => {
     await act(async () => { root.render(<TerminalTab api={api} presetAlias="demo" terminalFont={source} />) })
     await act(async () => { await Promise.resolve() })
 
-    // presetAlias preselects the host; the first control button is Connect.
-    const connect = container.querySelectorAll('button')[0] as HTMLButtonElement
+    // presetAlias preselects the host; find the Connect button by label
+    // (the host picker is now a custom dropdown button in the controls row).
+    const connect = [...container.querySelectorAll('button')]
+      .find(button => button.textContent === '连接') as HTMLButtonElement
     expect(connect.disabled).toBe(false)
     const fitsAfterConnect = fitSpy.mock.calls.length
     await act(async () => { connect.click() })

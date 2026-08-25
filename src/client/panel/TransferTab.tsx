@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import type { SshApi } from '../api.ts'
 import type { RemoteDirEntry, SshHostSummary, TransferProgress } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
+import { PanelSelect } from './Select.tsx'
 import css from './panel.module.css'
 
 /** Transfer tab props. */
@@ -168,10 +169,15 @@ export function TransferTab({ api }: TransferTabProps) {
   return (
     <div className={css.tabBody}>
       <div className={css.controls}>
-        <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
-          <option value="">{tt('transfer.selectHost')}</option>
-          {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>)}
-        </select>
+        <PanelSelect
+          ariaLabel={tt('transfer.selectHost')}
+          value={alias}
+          onChange={setAlias}
+          options={[
+            { value: '', label: tt('transfer.selectHost') },
+            ...hosts.map(host => ({ value: host.alias, label: host.alias + ' (' + host.host + ')' })),
+          ]}
+        />
         <input className={css.input} placeholder={tt('transfer.remotePathHint')} value={remotePath} onChange={event => { setRemotePath(event.target.value) }} />
         <button type="button" className={css.ghostButton} disabled={alias === ''} onClick={openBrowse}>{tt('transfer.browseRemote')}</button>
         <div className={css.toolbarSpacer} />

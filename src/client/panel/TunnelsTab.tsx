@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SshApi } from '../api.ts'
 import type { SshHostSummary, TunnelInfo } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
+import { PanelSelect } from './Select.tsx'
 import css from './panel.module.css'
 
 /** Live-tunnel polling interval while the tab is mounted (ms). */
@@ -177,10 +178,15 @@ export function TunnelsTab({ api }: TunnelsTabProps) {
         <div className={css.formRow}>
           <label className={css.field}>
             <span className={css.fieldLabel}>{tt('tunnel.alias')}</span>
-            <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
-              <option value="">{tt('terminal.selectHost')}</option>
-              {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias}</option>)}
-            </select>
+            <PanelSelect
+              ariaLabel={tt('terminal.selectHost')}
+              value={alias}
+              onChange={setAlias}
+              options={[
+                { value: '', label: tt('terminal.selectHost') },
+                ...hosts.map(host => ({ value: host.alias, label: host.alias })),
+              ]}
+            />
           </label>
           <label className={css.field}>
             <span className={css.fieldLabel}>{tt('tunnel.remotePort')}</span>

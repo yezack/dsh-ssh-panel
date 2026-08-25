@@ -146,12 +146,12 @@ describe('HostsTab grouped view', () => {
   it('renders collapsible group sections with counts and batch test', async () => {
     const api = makeApi()
     const container = await renderTab(api)
-    // Switch to environment grouping.
-    const select = container.querySelector('select')!
-    await act(async () => {
-      select.value = 'environment'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-    })
+    // Switch to environment grouping through the custom dropdown.
+    const groupBox = container.querySelector('button[class*="pSelectBox"]') as HTMLButtonElement
+    await act(async () => { groupBox.click() })
+    const envOption = [...container.querySelectorAll('button[class*="jumpOption"]')]
+      .find(button => button.textContent === '按环境分组') as HTMLButtonElement
+    await act(async () => { envOption.click() })
     const toggles = [...container.querySelectorAll('section button[aria-expanded]')] as HTMLButtonElement[]
     expect(toggles.map(toggle => toggle.getAttribute('aria-expanded'))).toEqual(['true', 'true'])
     const names = [...container.querySelectorAll('section .groupName, section [class*="groupName"]')].map(el => el.textContent)

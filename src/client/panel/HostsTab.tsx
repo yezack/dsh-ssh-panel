@@ -8,6 +8,7 @@ import type { SshApi } from '../api.ts'
 import type { SshHostSummary, TestResult } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
 import { HostFormDialog } from './HostFormDialog.tsx'
+import { PanelSelect } from './Select.tsx'
 import css from './panel.module.css'
 
 /** Hosts tab props. */
@@ -221,16 +222,16 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
     <div className={css.fillBody}>
       <div className={css.toolbar}>
         <input className={css.search} type="search" placeholder={tt('hosts.search')} value={search} onChange={event => { setSearch(event.target.value) }} />
-        <select
-          className={css.select}
-          aria-label={tt('hosts.groupBy.label')}
+        <PanelSelect
+          ariaLabel={tt('hosts.groupBy.label')}
           value={groupBy}
-          onChange={event => { setGroupBy(event.target.value as HostGroupBy) }}
-        >
-          <option value="none">{tt('hosts.groupBy.none')}</option>
-          <option value="environment">{tt('hosts.groupBy.environment')}</option>
-          <option value="tags">{tt('hosts.groupBy.tags')}</option>
-        </select>
+          onChange={value => { setGroupBy(value as HostGroupBy) }}
+          options={[
+            { value: 'none', label: tt('hosts.groupBy.none') },
+            { value: 'environment', label: tt('hosts.groupBy.environment') },
+            { value: 'tags', label: tt('hosts.groupBy.tags') },
+          ]}
+        />
         <div className={css.toolbarSpacer} />
         <button type="button" className={css.primaryButton} onClick={() => { setDialog({ mode: 'create' }) }}>{tt('hosts.add')}</button>
         <button type="button" className={css.ghostButton} disabled={importing} onClick={() => { void importConfig() }}>{importing ? tt('common.loading') : tt('hosts.import')}</button>
