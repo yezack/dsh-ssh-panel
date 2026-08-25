@@ -25,7 +25,7 @@ dsh Web GUI 的远程 SSH 运维插件：Host 进程内的持久 ssh2 连接池 
 ## 提交前检查
 
 ```sh
-pnpm --filter @linxin666/dsh-ssh test   # store + 引擎单测（内嵌 ssh2 Server + 真实 sshd）
+pnpm --filter @yezack/dsh-ssh test   # store + 引擎单测（内嵌 ssh2 Server + 真实 sshd）
 pnpm run typecheck
 pnpm run build
 ```

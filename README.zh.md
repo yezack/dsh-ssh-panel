@@ -32,17 +32,17 @@
 
 ## 安装
 
-推荐直接安装全家桶聚合包 `@linxin666/dsh-web-all`（一个包装齐全部功能插件与皮肤），或单独安装本插件：
+安装本插件：
 
 ```sh
 ### 从 npm 安装（推荐）
-dsh plugin --profile web add @linxin666/dsh-ssh@latest
+dsh plugin --profile web add @yezack/dsh-ssh@latest
 
 ### 从仓库安装（开发调试）
-git clone https://github.com/zhu1090093659/dsh-web.git
-cd dsh-web
-pnpm install && pnpm -r build
-dsh plugin --profile web add link:$(pwd)/packages/dsh-ssh
+git clone https://github.com/yezack/dsh-ssh-panel.git
+cd dsh-ssh-panel
+npm install && npm run build
+dsh plugin --profile web add link:$(pwd)
 
 ```
 
@@ -60,9 +60,9 @@ dsh plugin --profile web add link:$(pwd)/packages/dsh-ssh
 ## 开发
 
 ```sh
-pnpm install --filter @linxin666/dsh-ssh...
-pnpm --filter @linxin666/dsh-ssh test    # 单测：store + 引擎（内嵌 ssh2 Server + 真实 sshd）
-pnpm --filter @linxin666/dsh-ssh build   # tsc 类型 + tsdown 双半区产物
+pnpm install --filter @yezack/dsh-ssh...
+pnpm --filter @yezack/dsh-ssh test    # 单测：store + 引擎（内嵌 ssh2 Server + 真实 sshd）
+pnpm --filter @yezack/dsh-ssh build   # tsc 类型 + tsdown 双半区产物
 ```
 
 ## 已知限制

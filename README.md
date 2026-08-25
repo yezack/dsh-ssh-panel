@@ -32,17 +32,17 @@ Built on the capability list of [badseal/ssh-skill](https://github.com/badseal/s
 
 ## Install
 
-Install the family aggregate package `@linxin666/dsh-web-all` (all plugins and skins in one) or this plugin alone:
+Install this plugin:
 
 ```sh
 ### From npm (recommended)
-dsh plugin --profile web add @linxin666/dsh-ssh@latest
+dsh plugin --profile web add @yezack/dsh-ssh@latest
 
 ### From the repository (development)
-git clone https://github.com/zhu1090093659/dsh-web.git
-cd dsh-web
-pnpm install && pnpm -r build
-dsh plugin --profile web add link:$(pwd)/packages/dsh-ssh
+git clone https://github.com/yezack/dsh-ssh-panel.git
+cd dsh-ssh-panel
+npm install && npm run build
+dsh plugin --profile web add link:$(pwd)
 
 ```
 
@@ -60,9 +60,9 @@ The settings panel (plugin config) toggles `announceToAgent` (whether to announc
 ## Development
 
 ```sh
-pnpm install --filter @linxin666/dsh-ssh...
-pnpm --filter @linxin666/dsh-ssh test    # unit tests: store + engine (embedded ssh2 Server + real sshd)
-pnpm --filter @linxin666/dsh-ssh build   # tsc types + tsdown dual-half artifacts
+pnpm install --filter @yezack/dsh-ssh...
+pnpm --filter @yezack/dsh-ssh test    # unit tests: store + engine (embedded ssh2 Server + real sshd)
+pnpm --filter @yezack/dsh-ssh build   # tsc types + tsdown dual-half artifacts
 ```
 
 ## Known limitations
