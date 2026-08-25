@@ -116,6 +116,7 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
 
   const removeJump = (alias: string): void => {
     set('proxyJump', removeFromJumpList(form.proxyJump, alias))
+    jumpInputRef.current?.focus()
   }
 
   // Close the candidate menu on outside mousedown (the box and the menu
@@ -270,11 +271,14 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
             <span className={css.hint}>{tt('form.passwordHint')}</span>
           </label>
         )}
-        <label className={css.field}>
+        <div className={css.field}>
           <span className={css.fieldLabel}>{tt('form.proxyJump')}</span>
           <div className={css.jumpPicker}>
             <div className={css.jumpBoxWrap} ref={jumpWrapRef}>
-              <div className={css.jumpBox}>
+              <div
+                className={css.jumpBox}
+                onClick={() => { jumpInputRef.current?.focus() }}
+              >
                 {jumpAliases.map(alias => (
                   <span key={alias} className={css.jumpTag}>
                     <span className={css.jumpTagName}>{alias}</span>
@@ -329,7 +333,7 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
             )}
             <span className={css.hint}>{tt('form.proxyJumpHint')}</span>
           </div>
-        </label>
+        </div>
         <div className={css.formRow}>
           <label className={css.field}>
             <span className={css.fieldLabel}>{tt('form.environment')}</span>

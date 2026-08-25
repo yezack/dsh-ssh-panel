@@ -51,10 +51,18 @@ describe('HostFormDialog jump-host picker', () => {
     await act(async () => { await Promise.resolve() })
 
     // The prefilled chain renders as a tag INSIDE the input box.
-    const box = container.querySelector('[class*="jumpBox"]') as HTMLElement
-    const input = box.querySelector('input') as HTMLInputElement
+    const input = container.querySelector('input[class*="jumpInput"]') as HTMLInputElement
+    const box = input.parentElement as HTMLElement
     expect(box.textContent).toContain('bastion')
     expect([...box.querySelectorAll('button[class*="jumpTagRemove"]')]).toHaveLength(1)
+    // Clicking the box itself (empty area) must NOT hit any tag's × and
+    // must focus the inline input (label re-dispatch regression).
+    await act(async () => {
+      box.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(box.textContent).toContain('bastion')
+    expect(document.activeElement).toBe(input)
+
     // The edited host itself is not offered by the menu.
     await act(async () => {
       input.value = ''
