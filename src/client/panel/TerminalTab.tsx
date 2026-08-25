@@ -41,8 +41,12 @@ const MAX_RECONNECTS = 3
 /** Backoff base: reconnect delays are 1s, 2s, 4s. */
 const RECONNECT_BASE_MS = 1000
 
-/** Terminal background opacity (0.7 = 70% opaque; the panel/skin shows at 30%). */
-const TERMINAL_BG_OPACITY = 0.7
+/**
+ * Terminal background opacity. 1 = fully opaque theme color, identical to
+ * the idle placeholder (the look the user asked to keep). Set < 1 (e.g. 0.7)
+ * to let the panel/skin show through behind the terminal.
+ */
+const TERMINAL_BG_OPACITY = 1
 
 /**
  * The terminal background follows the active theme: resolve the
