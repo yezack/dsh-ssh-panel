@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * HostFormDialog jump-host picker: candidates come from the saved host list,
- * the host being edited is excluded (a host cannot jump through itself), and
- * toggled aliases are saved back in selection order as the proxyJump chain.
+ * HostFormDialog jump-host picker: candidates come from the saved host list
+ * (dropdown, self excluded), the selected chain renders as removable tags
+ * (× removes one hop), and the chain is saved in selection order.
  */
 
 import { act } from 'react'
@@ -34,7 +34,7 @@ function makeHost(alias: string): SshHostSummary {
 }
 
 describe('HostFormDialog jump-host picker', () => {
-  it('offers saved hosts (excluding self) and saves the toggled chain', async () => {
+  it('picks from the dropdown into removable tags and saves the chain order', async () => {
     const updateHost = vi.fn(async (_alias: string, _payload: unknown) => makeHost('web-1'))
     const api = {
       listHosts: vi.fn(async () => [makeHost('bastion'), makeHost('db-1'), makeHost('web-1')]),
@@ -49,22 +49,42 @@ describe('HostFormDialog jump-host picker', () => {
     })
     await act(async () => { await Promise.resolve() })
 
-    const chips = [...container.querySelectorAll('button[class*="jumpChip"]')] as HTMLButtonElement[]
-    const labels = chips.map(chip => chip.textContent ?? '')
-    // The edited host itself is not a valid jump candidate.
-    expect(labels.some(label => label.includes('web-1'))).toBe(false)
-    expect(labels.some(label => label.includes('bastion'))).toBe(true)
-    expect(labels.some(label => label.includes('db-1'))).toBe(true)
+    // Dropdown offers the remaining saved hosts: already-selected aliases
+    // (bastion, prefilled) and the edited host itself (web-1) are excluded.
+    const select = container.querySelector('select[aria-label="选择跳板机…"]') as HTMLSelectElement
+    const options = [...select.querySelectorAll('option')].map(option => option.value)
+    expect(options).not.toContain('bastion')
+    expect(options).toContain('db-1')
+    expect(options).not.toContain('web-1')
 
-    // Toggle db-1 on: chain becomes bastion, db-1 (selection order).
-    const dbChip = chips.find(chip => chip.textContent?.includes('db-1'))!
-    expect(dbChip.getAttribute('aria-pressed')).toBe('false')
-    await act(async () => { dbChip.click() })
-    expect(dbChip.getAttribute('aria-pressed')).toBe('true')
+    // The prefilled chain renders as a removable tag.
+    const removeButtons = [...container.querySelectorAll('button[class*="jumpTagRemove"]')] as HTMLButtonElement[]
+    expect(removeButtons).toHaveLength(1)
+    expect(container.textContent).toContain('bastion')
+
+    // Pick db-1 from the dropdown: chain becomes bastion, db-1, and with
+    // every candidate selected the dropdown disappears.
+    await act(async () => {
+      select.value = 'db-1'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    let tagsAfterPick = [...container.querySelectorAll('button[class*="jumpTagRemove"]')]
+    expect(tagsAfterPick).toHaveLength(2)
+    expect(container.querySelector('select')).toBeNull()
+
+    // Remove the first hop: chain becomes db-1 only, dropdown returns with
+    // the freed candidate.
+    await act(async () => { (tagsAfterPick[0] as HTMLButtonElement).click() })
+    const tagNames = [...container.querySelectorAll('span[class*="jumpTagName"]')].map(el => el.textContent)
+    expect(tagNames).toEqual(['db-1'])
+    tagsAfterPick = [...container.querySelectorAll('button[class*="jumpTagRemove"]')]
+    expect(tagsAfterPick).toHaveLength(1)
+    const selectAgain = container.querySelector('select') as HTMLSelectElement
+    expect([...selectAgain.querySelectorAll('option')].map(option => option.value)).toContain('bastion')
 
     const save = [...container.querySelectorAll('button')].find(button => button.textContent === '保存') as HTMLButtonElement
     await act(async () => { save.click() })
-    expect(updateHost).toHaveBeenCalledWith('web-1', expect.objectContaining({ proxyJump: ['bastion', 'db-1'] }))
+    expect(updateHost).toHaveBeenCalledWith('web-1', expect.objectContaining({ proxyJump: ['db-1'] }))
     await act(async () => { root.unmount() })
   })
 

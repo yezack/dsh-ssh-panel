@@ -697,42 +697,54 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   cursor: pointer;
 }
 
-/* --- host form: jump-host picker ----------------------------------------------- */
+/* --- host form: jump-host picker (dropdown + removable tags) -------------------- */
 
 .jumpPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jumpTags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.jumpChip {
+.jumpTag {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
   font-size: 12.5px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
   background: var(--dsw-specific-input-major);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
 }
 
-.jumpChip:hover:not([data-selected]) {
-  border-color: var(--dsw-alias-state-business-primary);
-}
-
-.jumpChip[data-selected] {
-  color: #fff;
-  background: var(--dsw-alias-state-business-primary);
-  border-color: var(--dsw-alias-state-business-primary);
-}
-
-.jumpChipHost {
-  font-size: 11px;
-  opacity: 0.72;
+.jumpTagName {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.jumpTagRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.jumpTagRemove:hover {
+  color: #fff;
+  background: var(--dsw-alias-state-danger, #d14343);
 }
 
 /* --- terminal ----------------------------------------------------------------- */

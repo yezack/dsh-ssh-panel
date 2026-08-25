@@ -42,11 +42,16 @@ function splitList(text: string): string[] {
   return text.split(',').map(part => part.trim()).filter(part => part !== '')
 }
 
-/** Toggle one alias in a comma-separated jump list (selection order kept). */
-function toggleInList(current: string, alias: string): string {
+/** Append one alias to a comma-separated jump list unless already present. */
+function appendToJumpList(current: string, alias: string): string {
   const list = splitList(current)
-  const next = list.includes(alias) ? list.filter(item => item !== alias) : [...list, alias]
-  return next.join(', ')
+  if (list.includes(alias)) return current
+  return [...list, alias].join(', ')
+}
+
+/** Remove one alias from a comma-separated jump list (order of the rest kept). */
+function removeFromJumpList(current: string, alias: string): string {
+  return splitList(current).filter(item => item !== alias).join(', ')
 }
 
 /** Initial form state: the summary's public fields plus empty secrets. */
@@ -227,30 +232,43 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
         )}
         <label className={css.field}>
           <span className={css.fieldLabel}>{tt('form.proxyJump')}</span>
-          {allHosts.filter(host => host.alias !== (editing?.alias ?? '')).length === 0 ? (
-            <span className={css.hint}>{tt('form.proxyJumpEmpty')}</span>
-          ) : (
-            <div className={css.jumpPicker}>
-              {allHosts
-                .filter(host => host.alias !== (editing?.alias ?? ''))
-                .map(host => {
-                  const selected = splitList(form.proxyJump).includes(host.alias)
-                  return (
+          <div className={css.jumpPicker}>
+            {splitList(form.proxyJump).length > 0 && (
+              <div className={css.jumpTags}>
+                {splitList(form.proxyJump).map(alias => (
+                  <span key={alias} className={css.jumpTag}>
+                    <span className={css.jumpTagName}>{alias}</span>
                     <button
-                      key={host.alias}
                       type="button"
-                      className={css.jumpChip}
-                      data-selected={selected || undefined}
-                      aria-pressed={selected}
-                      onClick={() => { set('proxyJump', toggleInList(form.proxyJump, host.alias)) }}
+                      className={css.jumpTagRemove}
+                      aria-label={tt('form.proxyJumpRemove', { alias })}
+                      title={tt('form.proxyJumpRemove', { alias })}
+                      onClick={() => { set('proxyJump', removeFromJumpList(form.proxyJump, alias)) }}
                     >
-                      {host.alias}
-                      <span className={css.jumpChipHost}>{host.host}</span>
+                      ×
                     </button>
-                  )
-                })}
-            </div>
-          )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {allHosts.some(host => host.alias !== (editing?.alias ?? '') && !splitList(form.proxyJump).includes(host.alias)) ? (
+              <select
+                className={css.input}
+                value=""
+                aria-label={tt('form.proxyJumpSelect')}
+                onChange={event => { set('proxyJump', appendToJumpList(form.proxyJump, event.target.value)) }}
+              >
+                <option value="">{tt('form.proxyJumpSelect')}</option>
+                {allHosts
+                  .filter(host => host.alias !== (editing?.alias ?? '') && !splitList(form.proxyJump).includes(host.alias))
+                  .map(host => (
+                    <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>
+                  ))}
+              </select>
+            ) : (
+              splitList(form.proxyJump).length === 0 && <span className={css.hint}>{tt('form.proxyJumpEmpty')}</span>
+            )}
+          </div>
           <span className={css.hint}>{tt('form.proxyJumpHint')}</span>
         </label>
         <div className={css.formRow}>
