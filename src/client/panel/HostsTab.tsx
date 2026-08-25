@@ -222,7 +222,7 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
       <div className={css.toolbar}>
         <input className={css.search} type="search" placeholder={tt('hosts.search')} value={search} onChange={event => { setSearch(event.target.value) }} />
         <select
-          className={css.groupBySelect}
+          className={css.select}
           aria-label={tt('hosts.groupBy.label')}
           value={groupBy}
           onChange={event => { setGroupBy(event.target.value as HostGroupBy) }}

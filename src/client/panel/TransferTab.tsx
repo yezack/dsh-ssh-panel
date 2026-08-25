@@ -168,7 +168,7 @@ export function TransferTab({ api }: TransferTabProps) {
   return (
     <div className={css.tabBody}>
       <div className={css.controls}>
-        <select className={css.input} value={alias} onChange={event => { setAlias(event.target.value) }}>
+        <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
           <option value="">{tt('transfer.selectHost')}</option>
           {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>)}
         </select>

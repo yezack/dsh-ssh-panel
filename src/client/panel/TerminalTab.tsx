@@ -220,7 +220,7 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   return (
     <div className={css.termBody}>
       <div className={css.controls}>
-        <select className={css.input} value={alias} onChange={event => { setAlias(event.target.value) }}>
+        <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
           <option value="">{tt('terminal.selectHost')}</option>
           {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>)}
         </select>

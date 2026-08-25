@@ -229,7 +229,8 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   flex-wrap: wrap;
 }
 
-.controls .input {
+.controls .input,
+.controls .select {
   flex: 0 1 260px;
   min-width: 150px;
 }
@@ -254,14 +255,30 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   color: var(--dsw-alias-label-tertiary);
 }
 
-.groupBySelect {
-  padding: 6px 8px;
+/* Unified native <select> (hosts grouping, terminal/transfer/tunnel host
+   pickers): one look across every tab. color-scheme drives the UA dropdown
+   panel, so the popup follows the active theme instead of staying white in
+   dark mode (the app marks dark via body[data-ds-dark-theme] and sets the
+   root color-scheme; this pins both explicitly). */
+.select {
+  padding: 6px 10px;
   font-size: 13px;
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-specific-input-major);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   outline: none;
+  font-family: inherit;
+  cursor: pointer;
+  color-scheme: light;
+}
+
+.select:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+body[data-ds-dark-theme] .select {
+  color-scheme: dark;
 }
 
 /* --- host groups (#379) ------------------------------------------------------- */

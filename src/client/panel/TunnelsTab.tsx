@@ -177,7 +177,7 @@ export function TunnelsTab({ api }: TunnelsTabProps) {
         <div className={css.formRow}>
           <label className={css.field}>
             <span className={css.fieldLabel}>{tt('tunnel.alias')}</span>
-            <select className={css.input} value={alias} onChange={event => { setAlias(event.target.value) }}>
+            <select className={css.select} value={alias} onChange={event => { setAlias(event.target.value) }}>
               <option value="">{tt('terminal.selectHost')}</option>
               {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias}</option>)}
             </select>
