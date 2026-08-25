@@ -16,6 +16,8 @@ export interface HostsTabProps {
   api: SshApi
   /** Connect the given alias in the terminal tab. */
   onConnect: (alias: string) => void
+  /** Live terminal session counts per alias (badged in each row). */
+  sessionCounts?: Record<string, number>
 }
 
 /** The host-form dialog invocation. */
@@ -87,7 +89,7 @@ export function sortHosts(hosts: SshHostSummary[], key: HostSortKey, dir: 'asc' 
 }
 
 /** The hosts table plus its toolbar and dialogs. */
-export function HostsTab({ api, onConnect }: HostsTabProps) {
+export function HostsTab({ api, onConnect, sessionCounts }: HostsTabProps) {
   const [hosts, setHosts] = useState<SshHostSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -274,6 +276,11 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
             )}
             <button type="button" className={css.linkButton} onClick={() => { setDialog({ mode: 'edit', host }) }}>{tt('hosts.edit')}</button>
             <button type="button" className={css.linkButton} data-danger onClick={() => { void deleteHost(host.alias) }}>{tt('hosts.delete')}</button>
+            {(sessionCounts?.[host.alias] ?? 0) > 0 && (
+              <span className={css.liveBadge} title={tt('hosts.sessionLive', { count: sessionCounts![host.alias]! })}>
+                {tt('hosts.sessionLive', { count: sessionCounts![host.alias]! })}
+              </span>
+            )}
             <button type="button" className={css.ghostButton} onClick={() => { onConnect(host.alias) }}>{tt('hosts.connected')}</button>
           </div>
         </td>

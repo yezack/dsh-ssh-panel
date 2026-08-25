@@ -42,16 +42,25 @@ const TABS: ReadonlyArray<{ id: SshTab; label: () => string }> = [
 interface ConnectRequest {
   alias: string
   nonce: number
+  /** The duplicate-session confirmation already happened here. */
+  confirmedDuplicate?: boolean
 }
 
 /** The tabbed SSH panel. */
 export function SshPanel({ controller, api, terminalFont }: SshPanelProps) {
   const [activeTab, setActiveTab] = useState<SshTab>('hosts')
   const [connectRequest, setConnectRequest] = useState<ConnectRequest | null>(null)
+  const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({})
 
   const handleConnect = (alias: string): void => {
+    // Opening a host that already has live terminals is almost always a
+    // mis-click — ask here, before yanking the user to the terminal tab.
+    const existing = sessionCounts[alias] ?? 0
+    if (existing > 0) {
+      if (!window.confirm(tt('terminal.duplicateConfirm', { alias, count: existing }))) return
+    }
     setActiveTab('terminal')
-    setConnectRequest(prev => ({ alias, nonce: (prev?.nonce ?? 0) + 1 }))
+    setConnectRequest(prev => ({ alias, nonce: (prev?.nonce ?? 0) + 1, confirmedDuplicate: existing > 0 }))
   }
 
   return (
@@ -80,8 +89,8 @@ export function SshPanel({ controller, api, terminalFont }: SshPanelProps) {
       <div className={css.panelContent}>
         {/* Tabs stay mounted; inactive ones are hidden with CSS so live
             terminal sessions and in-flight state survive tab switches. */}
-        <div className={activeTab === 'hosts' ? css.panelTab : css.panelTabHidden}><HostsTab api={api} onConnect={handleConnect} /></div>
-        <div className={activeTab === 'terminal' ? css.panelTab : css.panelTabHidden}><TerminalTab api={api} presetAlias={connectRequest?.alias} requestId={connectRequest?.nonce} terminalFont={terminalFont} /></div>
+        <div className={activeTab === 'hosts' ? css.panelTab : css.panelTabHidden}><HostsTab api={api} onConnect={handleConnect} sessionCounts={sessionCounts} /></div>
+        <div className={activeTab === 'terminal' ? css.panelTab : css.panelTabHidden}><TerminalTab api={api} presetAlias={connectRequest?.alias} requestId={connectRequest?.nonce} duplicateConfirmed={connectRequest?.confirmedDuplicate} onSessionsChange={setSessionCounts} terminalFont={terminalFont} /></div>
         <div className={activeTab === 'transfer' ? css.panelTab : css.panelTabHidden}><TransferTab api={api} /></div>
         <div className={activeTab === 'tunnels' ? css.panelTab : css.panelTabHidden}><TunnelsTab api={api} /></div>
         <div className={activeTab === 'cluster' ? css.panelTab : css.panelTabHidden}><ClusterTab api={api} /></div>

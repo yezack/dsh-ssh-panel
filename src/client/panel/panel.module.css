@@ -363,6 +363,18 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   color: var(--dsw-alias-state-business-primary);
 }
 
+/* Live-session badge in the hosts table (how many terminals are open). */
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-state-success, #67c23a);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 /* --- host groups (#379) ------------------------------------------------------- */
 
 .groupSection + .groupSection {
@@ -1041,6 +1053,12 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
 .sessionChipRetry {
   font-size: 11px;
   color: var(--dsw-alias-state-danger, #f56c6c);
+}
+
+.sessionChipCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .sessionChipClose {

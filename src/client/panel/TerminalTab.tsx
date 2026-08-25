@@ -29,6 +29,10 @@ export interface TerminalTabProps {
    * legacy mounts: the font then comes from the CSS custom-property chain.
    */
   terminalFont?: TerminalFontSource
+  /** True when the hosts-list connect action already confirmed a duplicate. */
+  duplicateConfirmed?: boolean
+  /** Reports live session counts per alias (hosts list badge). */
+  onSessionsChange?: (counts: Record<string, number>) => void
 }
 
 /** Max auto-reconnect attempts per session (transport errors only). */
@@ -76,7 +80,7 @@ const NO_FONT_SOURCE: TerminalFontSource = {
 }
 
 /** The xterm terminal view. */
-export function TerminalTab({ api, presetAlias, requestId, terminalFont }: TerminalTabProps) {
+export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplicateConfirmed, onSessionsChange }: TerminalTabProps) {
   const [hosts, setHosts] = useState<SshHostSummary[]>([])
   const [alias, setAlias] = useState(presetAlias ?? '')
   const [sessions, setSessions] = useState<TermSession[]>([])
@@ -95,6 +99,18 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   const activeSession = sessions.find(session => session.id === activeId) ?? null
 
   useEffect(() => { ensureXtermCss() }, [])
+
+  // Report live (connecting/connected) session counts per alias so the hosts
+  // list can badge how many terminals are open against each host.
+  useEffect(() => {
+    const counts: Record<string, number> = {}
+    for (const session of sessions) {
+      if (session.status === 'connecting' || session.status === 'connected') {
+        counts[session.alias] = (counts[session.alias] ?? 0) + 1
+      }
+    }
+    onSessionsChange?.(counts)
+  }, [sessions, onSessionsChange])
 
   // Live re-apply a terminal-font change (issue #577) to every session.
   useEffect(() => {
@@ -121,13 +137,14 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     return () => { disposed = true }
   }, [api])
 
-  // A hosts-tab connect action opens a new session for its alias.
+  // A hosts-tab connect action opens a new session for its alias. The
+  // panel already confirmed duplicates in that flow (see SshPanel).
   useEffect(() => {
     if (presetAlias === undefined || requestId === undefined) return
     setAlias(presetAlias)
-    const timer = setTimeout(() => { connectToRef.current(presetAlias) }, 0)
+    const timer = setTimeout(() => { connectToRef.current(presetAlias, duplicateConfirmed ?? false) }, 0)
     return () => { clearTimeout(timer) }
-  }, [presetAlias, requestId])
+  }, [presetAlias, requestId, duplicateConfirmed])
 
   /** Show one session's xterm element; hide the others (all live in the container). */
   const showSession = (target: TermSession): void => {
@@ -226,9 +243,16 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   }
 
   /** Open a brand-new session for the given alias. */
-  const createSession = (target: string): void => {
+  const createSession = (target: string, duplicateConfirmedByCaller = false): void => {
     const container = containerRef.current
     if (target === '' || container === null) return
+    // Opening the same host twice is almost always a mis-click (including
+    // the hosts-list connect action); ask first unless the caller already did.
+    const live = sessionsRef.current.filter(session =>
+      session.alias === target && (session.status === 'connecting' || session.status === 'connected')).length
+    if (live > 0 && !duplicateConfirmedByCaller) {
+      if (!window.confirm(tt('terminal.duplicateConfirm', { alias: target, count: live }))) return
+    }
     const id = nextSessionId.current
     nextSessionId.current += 1
     const term = new Terminal({
@@ -279,7 +303,7 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
 
   // The hosts-tab connect action fires from an effect; keep the latest
   // createSession in a ref so the timer never calls a stale closure.
-  const connectToRef = useRef<(alias: string) => void>(() => undefined)
+  const connectToRef = useRef<(alias: string, confirmed?: boolean) => void>(() => undefined)
   connectToRef.current = createSession
 
   const disconnect = (): void => {
@@ -391,6 +415,45 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
 
   const reconnecting = activeSession !== null && activeSession.status === 'connecting' && activeSession.reconnectAttempts > 0
 
+  // Sessions aggregate by target alias: one chip per host, count badge when
+  // several sessions share it. Clicking a chip cycles through its sessions.
+  const sessionGroups: Array<{ alias: string; sessions: TermSession[] }> = []
+  const groupIndex = new Map<string, number>()
+  for (const session of sessions) {
+    const at = groupIndex.get(session.alias)
+    if (at === undefined) {
+      groupIndex.set(session.alias, sessionGroups.length)
+      sessionGroups.push({ alias: session.alias, sessions: [session] })
+    } else {
+      sessionGroups[at].sessions.push(session)
+    }
+  }
+
+  const activateGroup = (group: { alias: string; sessions: TermSession[] }): void => {
+    const current = group.sessions.findIndex(session => session.id === activeId)
+    const next = group.sessions[(current + 1) % group.sessions.length]
+    activateSession(next.id)
+  }
+
+  const closeGroup = (group: { alias: string; sessions: TermSession[] }): void => {
+    if (!window.confirm(tt('terminal.closeConfirm', { alias: group.alias, count: group.sessions.length }))) return
+    // Tear down and remove every session of the host in ONE state snapshot:
+    // looping closeSession would re-read the stale sessions ref between
+    // updates and resurrect removed sessions.
+    const ids = new Set(group.sessions.map(session => session.id))
+    const remaining = sessionsRef.current.filter(session => !ids.has(session.id))
+    for (const session of sessionsRef.current) {
+      if (ids.has(session.id)) teardownSession(session)
+    }
+    setSessions(remaining)
+    if (activeId !== null && ids.has(activeId)) {
+      const next = remaining.length > 0 ? remaining[remaining.length - 1]! : null
+      setActiveId(next === null ? null : next.id)
+      setSelectionActive(false)
+      if (next !== null) showSession(next)
+    }
+  }
+
   return (
     <div className={css.termBody}>
       <div className={css.controls}>
@@ -406,28 +469,30 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
         <button type="button" className={css.primaryButton} disabled={alias === ''} onClick={connect}>{tt('terminal.connect')}</button>
         <button type="button" className={css.ghostButton} disabled={activeSession === null} onClick={disconnect}>{tt('terminal.disconnect')}</button>
       </div>
-      {sessions.length > 0 && (
+      {sessionGroups.length > 0 && (
         <div className={css.sessionBar} role="tablist" aria-label={tt('terminal.sessions')}>
-          {sessions.map(session => {
-            const active = session.id === activeId
+          {sessionGroups.map(group => {
+            const activeSessionInGroup = group.sessions.find(session => session.id === activeId) ?? group.sessions[0]
+            const active = activeSessionInGroup.id === activeId
             return (
-              <div key={session.id} className={active ? css.sessionChip + ' ' + css.sessionChipActive : css.sessionChip}>
+              <div key={group.alias} className={active ? css.sessionChip + ' ' + css.sessionChipActive : css.sessionChip}>
                 <button
                   type="button"
                   role="tab"
                   aria-selected={active}
                   className={css.sessionChipMain}
-                  onClick={() => { activateSession(session.id) }}
+                  onClick={() => { activateGroup(group) }}
                 >
-                  <span className={css.sessionChipDot} data-status={session.status} aria-hidden="true" />
-                  <span className={css.sessionChipAlias}>{session.alias}</span>
-                  {session.reconnectAttempts > 0 && <span className={css.sessionChipRetry}>({session.reconnectAttempts}/{MAX_RECONNECTS})</span>}
+                  <span className={css.sessionChipDot} data-status={activeSessionInGroup.status} aria-hidden="true" />
+                  <span className={css.sessionChipAlias}>{group.alias}</span>
+                  {group.sessions.length > 1 && <span className={css.sessionChipCount}>×{group.sessions.length}</span>}
+                  {activeSessionInGroup.reconnectAttempts > 0 && <span className={css.sessionChipRetry}>({activeSessionInGroup.reconnectAttempts}/{MAX_RECONNECTS})</span>}
                 </button>
                 <button
                   type="button"
                   className={css.sessionChipClose}
-                  aria-label={tt('terminal.sessionClose', { alias: session.alias })}
-                  onClick={() => { closeSession(session.id) }}
+                  aria-label={tt('terminal.sessionClose', { alias: group.alias })}
+                  onClick={() => { closeGroup(group) }}
                 >
                   ×
                 </button>
