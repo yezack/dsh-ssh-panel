@@ -107,6 +107,25 @@ describe('TerminalTab sessions', () => {
     await act(async () => { main.click() })
     expect(container.querySelectorAll('div[class*="sessionChipActive"]')).toHaveLength(1)
 
+    // With several sessions for one host, a SECOND-LEVEL tab bar appears
+    // (per-session tabs) and switches directly.
+    const subTabs = [...container.querySelectorAll('div[class*="sessionSubTab"]')]
+    expect(subTabs.length).toBe(2)
+    expect(subTabs[0]!.textContent).toContain('#1')
+    expect(subTabs[1]!.textContent).toContain('#2')
+    const subMain = subTabs[1]!.querySelector('button[class*="sessionSubTabMain"]') as HTMLButtonElement
+    await act(async () => { subMain.click() })
+    expect(container.querySelectorAll('div[class*="sessionSubTabActive"]')).toHaveLength(1)
+
+    // Closing ONE session from a sub tab asks, then leaves the other session
+    // alive and hides the sub bar (only one session remains).
+    const subClose = subTabs[0]!.querySelector('button[class*="sessionSubTabClose"]') as HTMLButtonElement
+    await act(async () => { subClose.click() })
+    expect(window.confirm).toHaveBeenCalled()
+    expect(container.querySelectorAll('div[class*="sessionSubTab"]')).toHaveLength(0)
+    expect(container.querySelectorAll('div[class*="sessionChip"]')).toHaveLength(1)
+    expect(api.openTerminal).toHaveBeenCalledTimes(2)
+
     // Closing the tab asks first, then removes every session of the host.
     const close = chips[0]!.querySelector('button[class*="sessionChipClose"]') as HTMLButtonElement
     await act(async () => { close.click() })

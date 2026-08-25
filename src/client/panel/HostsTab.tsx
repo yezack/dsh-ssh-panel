@@ -9,6 +9,7 @@ import type { SshHostSummary, TestResult } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
 import { HostFormDialog } from './HostFormDialog.tsx'
 import { PanelSelect } from './Select.tsx'
+import { useConfirm } from './confirm.tsx'
 import css from './panel.module.css'
 
 /** Hosts tab props. */
@@ -112,6 +113,7 @@ export function HostsTab({ api, onConnect, sessionCounts }: HostsTabProps) {
   // sibling tabs (terminal / transfer / tunnels) already guard with a
   // disposed flag.
   const mountedRef = useRef(true)
+  const confirm = useConfirm()
   useEffect(() => () => { mountedRef.current = false }, [])
 
   const load = useCallback(async (query?: string): Promise<void> => {
@@ -157,7 +159,8 @@ export function HostsTab({ api, onConnect, sessionCounts }: HostsTabProps) {
   }
 
   const deleteHost = async (alias: string): Promise<void> => {
-    if (!window.confirm(tt('hosts.deleteConfirm', { alias }))) return
+    const ok = await confirm({ text: tt('hosts.deleteConfirm', { alias }), danger: true })
+    if (!ok) return
     try {
       await api.deleteHost(alias)
       if (!mountedRef.current) return
@@ -193,7 +196,8 @@ export function HostsTab({ api, onConnect, sessionCounts }: HostsTabProps) {
 
   /** Batch action: delete every selected host (one confirmation). */
   const runBatchDelete = async (): Promise<void> => {
-    if (!window.confirm(tt('hosts.batch.deleteConfirm', { count: selected.size }))) return
+    const ok = await confirm({ text: tt('hosts.batch.deleteConfirm', { count: selected.size }), danger: true })
+    if (!ok) return
     const aliases = [...selected]
     for (const alias of aliases) {
       try {

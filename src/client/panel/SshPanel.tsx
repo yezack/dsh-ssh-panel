@@ -1,13 +1,16 @@
 /**
  * The SSH operations panel shell: a header with a close control, a five-tab
- * bar, and the active tab's content. Tab state lives here (browser session
- * state); inactive tabs unmount, so each tab fetches its own data on
- * activation. The hosts tab's connect action switches here to the terminal
- * tab with the chosen alias preselected.
+ * bar, and the active tab's content. Tab state lives here; tabs stay
+ * mounted (inactive ones are CSS-hidden) so live terminal sessions and
+ * in-flight state survive tab switches. The hosts tab's connect action
+ * switches here to the terminal tab with the chosen alias preselected.
+ * A ConfirmProvider wraps the tabs so every confirm is an in-panel modal
+ * instead of the blocking window.confirm.
  */
 import { useState } from 'react'
 import type { SshApi } from '../api.ts'
 import type { PanelController } from './controller.ts'
+import { ConfirmProvider, useConfirm } from './confirm.tsx'
 import { tt, type TerminalFontSource } from './helpers.ts'
 import { ClusterTab } from './ClusterTab.tsx'
 import { HostsTab } from './HostsTab.tsx'
@@ -46,18 +49,32 @@ interface ConnectRequest {
   confirmedDuplicate?: boolean
 }
 
-/** The tabbed SSH panel. */
-export function SshPanel({ controller, api, terminalFont }: SshPanelProps) {
+/** The tabbed SSH panel (provides the confirm modal to every tab). */
+export function SshPanel(props: SshPanelProps) {
+  return (
+    <ConfirmProvider>
+      <SshPanelBody {...props} />
+    </ConfirmProvider>
+  )
+}
+
+/** The actual panel body; confirm comes from the provider above. */
+function SshPanelBody({ controller, api, terminalFont }: SshPanelProps) {
   const [activeTab, setActiveTab] = useState<SshTab>('hosts')
   const [connectRequest, setConnectRequest] = useState<ConnectRequest | null>(null)
   const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({})
+  const confirm = useConfirm()
 
-  const handleConnect = (alias: string): void => {
+  const handleConnect = async (alias: string): Promise<void> => {
     // Opening a host that already has live terminals is almost always a
     // mis-click — ask here, before yanking the user to the terminal tab.
     const existing = sessionCounts[alias] ?? 0
     if (existing > 0) {
-      if (!window.confirm(tt('terminal.duplicateConfirm', { alias, count: existing }))) return
+      const ok = await confirm({
+        text: tt('terminal.duplicateConfirm', { alias, count: existing }),
+        confirmLabel: tt('terminal.openAnother', { count: existing }),
+      })
+      if (!ok) return
     }
     setActiveTab('terminal')
     setConnectRequest(prev => ({ alias, nonce: (prev?.nonce ?? 0) + 1, confirmedDuplicate: existing > 0 }))

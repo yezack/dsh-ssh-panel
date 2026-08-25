@@ -8,6 +8,7 @@ import type { SshApi } from '../api.ts'
 import type { SshHostSummary, TunnelInfo } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
 import { PanelSelect } from './Select.tsx'
+import { useConfirm } from './confirm.tsx'
 import css from './panel.module.css'
 
 /** Live-tunnel polling interval while the tab is mounted (ms). */
@@ -51,6 +52,7 @@ export function TunnelsTab({ api }: TunnelsTabProps) {
   const [remoteHost, setRemoteHost] = useState('')
   const [localPort, setLocalPort] = useState('')
   const [busy, setBusy] = useState(false)
+  const confirm = useConfirm()
 
   // Hosts for the new-tunnel form (failure does not block tunnel listing).
   useEffect(() => {
@@ -112,7 +114,7 @@ export function TunnelsTab({ api }: TunnelsTabProps) {
   }
 
   const stopAll = async (): Promise<void> => {
-    if (!window.confirm(tt('tunnel.stopAllConfirm'))) return
+    if (!(await confirm({ text: tt('tunnel.stopAllConfirm'), danger: true }))) return
     setBusy(true)
     try {
       await api.stopAllTunnels(alias === '' ? undefined : alias)

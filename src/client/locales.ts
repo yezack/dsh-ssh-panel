@@ -104,6 +104,7 @@ export const zh = {
   'terminal.sessionClose': '关闭会话 {alias}',
   'terminal.reconnecting': '连接断开，正在重连（{attempt}/{max}）…',
   'terminal.duplicateConfirm': '{alias} 已有 {count} 个会话，确定再开一个？',
+  'terminal.openAnother': '再开一个',
   'terminal.closeConfirm': '确定关闭 {alias} 的 {count} 个会话？',
   'hosts.sessionLive': '会话 ×{count}',
   // transfer
@@ -170,6 +171,8 @@ export const zh = {
   'common.error': '出错：{error}',
   'common.refresh': '刷新',
   'common.confirm': '确定',
+  'confirm.title': '请确认',
+  'confirm.ok': '确定',
 } as const
 
 export const en: Record<keyof typeof zh, string> = {
@@ -271,6 +274,7 @@ export const en: Record<keyof typeof zh, string> = {
   'terminal.sessionClose': 'Close session {alias}',
   'terminal.reconnecting': 'Connection lost, reconnecting ({attempt}/{max})…',
   'terminal.duplicateConfirm': '{alias} already has {count} live session(s), open another?',
+  'terminal.openAnother': 'Open another',
   'terminal.closeConfirm': 'Close {count} session(s) for {alias}?',
   'hosts.sessionLive': 'sessions ×{count}',
   'transfer.selectHost': 'Select host',
@@ -333,6 +337,8 @@ export const en: Record<keyof typeof zh, string> = {
   'common.error': 'Error: {error}',
   'common.refresh': 'Refresh',
   'common.confirm': 'Confirm',
+  'confirm.title': 'Confirm',
+  'confirm.ok': 'OK',
 }
 
 /** Locale key union. */

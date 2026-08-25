@@ -15,6 +15,7 @@ import type { SshHostSummary } from '../../protocol.ts'
 import { XTERM_CSS } from './xterm.css.ts'
 import { errorMessage, resolveTerminalFontFamily, tt, type TerminalFontSource } from './helpers.ts'
 import { PanelSelect } from './Select.tsx'
+import { useConfirm } from './confirm.tsx'
 import css from './panel.module.css'
 
 /** Terminal tab props. */
@@ -97,6 +98,7 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
   const fontOverride = useSyncExternalStore(fontSource.subscribe, fontSource.get)
 
   const activeSession = sessions.find(session => session.id === activeId) ?? null
+  const confirm = useConfirm()
 
   useEffect(() => { ensureXtermCss() }, [])
 
@@ -243,7 +245,7 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
   }
 
   /** Open a brand-new session for the given alias. */
-  const createSession = (target: string, duplicateConfirmedByCaller = false): void => {
+  const createSession = async (target: string, duplicateConfirmedByCaller = false): Promise<void> => {
     const container = containerRef.current
     if (target === '' || container === null) return
     // Opening the same host twice is almost always a mis-click (including
@@ -251,7 +253,11 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
     const live = sessionsRef.current.filter(session =>
       session.alias === target && (session.status === 'connecting' || session.status === 'connected')).length
     if (live > 0 && !duplicateConfirmedByCaller) {
-      if (!window.confirm(tt('terminal.duplicateConfirm', { alias: target, count: live }))) return
+      const ok = await confirm({
+        text: tt('terminal.duplicateConfirm', { alias: target, count: live }),
+        confirmLabel: tt('terminal.openAnother', { count: live }),
+      })
+      if (!ok) return
     }
     const id = nextSessionId.current
     nextSessionId.current += 1
@@ -299,11 +305,11 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
     }
   }
 
-  const connect = (): void => { createSession(alias) }
+  const connect = (): void => { void createSession(alias) }
 
   // The hosts-tab connect action fires from an effect; keep the latest
   // createSession in a ref so the timer never calls a stale closure.
-  const connectToRef = useRef<(alias: string, confirmed?: boolean) => void>(() => undefined)
+  const connectToRef = useRef<(alias: string, confirmed?: boolean) => void | Promise<void>>(() => undefined)
   connectToRef.current = createSession
 
   const disconnect = (): void => {
@@ -435,8 +441,14 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
     activateSession(next.id)
   }
 
-  const closeGroup = (group: { alias: string; sessions: TermSession[] }): void => {
-    if (!window.confirm(tt('terminal.closeConfirm', { alias: group.alias, count: group.sessions.length }))) return
+  // Secondary (per-session) tabs: when the active host has several sessions,
+  // the "终端已连接" banner area becomes a second-level tab bar for them.
+  const activeGroup = sessionGroups.find(group => group.sessions.some(session => session.id === activeId)) ?? null
+  const secondaryTabs = activeGroup !== null && activeGroup.sessions.length > 1 ? activeGroup.sessions : null
+
+  const closeGroup = async (group: { alias: string; sessions: TermSession[] }): Promise<void> => {
+    const ok = await confirm({ text: tt('terminal.closeConfirm', { alias: group.alias, count: group.sessions.length }), danger: true })
+    if (!ok) return
     // Tear down and remove every session of the host in ONE state snapshot:
     // looping closeSession would re-read the stale sessions ref between
     // updates and resurrect removed sessions.
@@ -452,6 +464,15 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
       setSelectionActive(false)
       if (next !== null) showSession(next)
     }
+  }
+
+  /** Close ONE session from a secondary tab (asks first). */
+  const closeSessionWithConfirm = async (id: number): Promise<void> => {
+    const session = sessionsRef.current.find(candidate => candidate.id === id)
+    if (session === undefined) return
+    const ok = await confirm({ text: tt('terminal.closeConfirm', { alias: session.alias, count: 1 }), danger: true })
+    if (!ok) return
+    closeSession(id)
   }
 
   return (
@@ -501,13 +522,43 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
           })}
         </div>
       )}
+      {secondaryTabs !== null && (
+        <div className={css.sessionSubBar} role="tablist" aria-label={tt('terminal.sessions')}>
+          {secondaryTabs.map((session, index) => {
+            const active = session.id === activeId
+            return (
+              <div key={session.id} className={active ? css.sessionSubTab + ' ' + css.sessionSubTabActive : css.sessionSubTab}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={css.sessionSubTabMain}
+                  onClick={() => { activateSession(session.id) }}
+                >
+                  <span className={css.sessionChipDot} data-status={session.status} aria-hidden="true" />
+                  <span className={css.sessionSubTabLabel}>{session.alias} #{index + 1}</span>
+                  {session.reconnectAttempts > 0 && <span className={css.sessionChipRetry}>({session.reconnectAttempts}/{MAX_RECONNECTS})</span>}
+                </button>
+                <button
+                  type="button"
+                  className={css.sessionSubTabClose}
+                  aria-label={tt('terminal.sessionClose', { alias: session.alias + ' #' + (index + 1) })}
+                  onClick={() => { void closeSessionWithConfirm(session.id) }}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {activeSession !== null && activeSession.status === 'connecting' && !reconnecting && (
         <div className={css.banner} data-kind="info">{tt('terminal.connecting')}</div>
       )}
       {reconnecting && (
         <div className={css.banner} data-kind="info">{tt('terminal.reconnecting', { attempt: activeSession!.reconnectAttempts, max: MAX_RECONNECTS })}</div>
       )}
-      {activeSession !== null && activeSession.status === 'connected' && (
+      {activeSession !== null && activeSession.status === 'connected' && secondaryTabs === null && (
         <div className={css.banner} data-kind="ok">{tt('terminal.ready', { alias: activeSession.alias })}</div>
       )}
       {activeSession !== null && activeSession.status === 'exited' && (

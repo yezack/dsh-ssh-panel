@@ -7,6 +7,7 @@ import { useState } from 'react'
 import type { SshApi } from '../api.ts'
 import type { ClusterResult } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
+import { useConfirm } from './confirm.tsx'
 import css from './panel.module.css'
 
 /** Cluster tab props. */
@@ -28,10 +29,11 @@ export function ClusterTab({ api }: ClusterTabProps) {
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState<ClusterResult[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const confirm = useConfirm()
 
   const run = async (): Promise<void> => {
     if (command.trim() === '' || running) return
-    if (!window.confirm(tt('cluster.confirm'))) return
+    if (!(await confirm({ text: tt('cluster.confirm'), danger: true }))) return
     setRunning(true)
     setError(null)
     try {

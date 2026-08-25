@@ -727,6 +727,30 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   color: var(--dsw-alias-label-primary);
 }
 
+/* In-panel confirm dialog (replaces blocking window.confirm). */
+.confirmText {
+  margin: 0;
+  padding: 10px 0 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dangerButton {
+  padding: 7px 14px;
+  font-size: 13px;
+  color: #fff;
+  background: var(--dsw-alias-state-danger, #f56c6c);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dangerButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 .modalTitle {
   margin: 0;
   font-size: 15px;
@@ -1077,6 +1101,69 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
 }
 
 .sessionChipClose:hover {
+  color: var(--dsw-alias-state-danger, #f56c6c);
+}
+
+/* Secondary (per-session) tabs shown when one host has several sessions. */
+.sessionSubBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: none;
+}
+
+.sessionSubTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 3px 0 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+}
+
+.sessionSubTabActive {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.sessionSubTabMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sessionSubTabLabel {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.sessionSubTabClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.sessionSubTabClose:hover {
   color: var(--dsw-alias-state-danger, #f56c6c);
 }
 
