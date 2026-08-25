@@ -50,6 +50,13 @@ class StubEngine {
     writeFileSync(localPath, 'hello', 'utf8')
     return { bytes: 5 }
   }
+
+  async downloadTree(_alias: string, remotePath: string, localPath: string): Promise<{ bytes: number; files: number; isDirectory: boolean; name: string }> {
+    // Materialize the staged file the download route streams out.
+    this.downloadMode = statSync(localPath).mode & 0o777
+    writeFileSync(localPath, 'hello', 'utf8')
+    return { bytes: 5, files: 1, isDirectory: false, name: remotePath.split('/').pop() ?? 'download' }
+  }
   async ls(): Promise<unknown[]> {
     return []
   }

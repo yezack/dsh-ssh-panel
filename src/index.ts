@@ -14,6 +14,8 @@ import z from 'schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
+import { join } from 'node:path'
+import { dshHome } from './dsh-home.ts'
 import { SshEngine } from './engine.ts'
 import { makeRoutes } from './routes.ts'
 import { HostStore } from './store.ts'
@@ -86,7 +88,8 @@ function applyImpl(ctx: Context, config?: Config): void {
   }
 
   const store = new HostStore()
-  const engine = new SshEngine(store)
+  // Tunnels persist across restarts via $DSH_HOME/dsh-ssh-tunnels.json.
+  const engine = new SshEngine(store, undefined, join(dshHome(), 'dsh-ssh-tunnels.json'))
   ctx.effect(() => () => { engine.dispose() }, 'dsh-ssh: engine')
 
   // The /api/dsh-ssh route family + terminal upgrade.

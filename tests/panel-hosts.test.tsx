@@ -183,8 +183,9 @@ describe('HostsTab jump column', () => {
     await act(async () => { root.render(<HostsTab api={api} onConnect={() => {}} />) })
     await act(async () => { await Promise.resolve() })
     const rows = [...container.querySelectorAll('tbody tr')]
-    expect(rows[0]).not.toBeNull()
-    expect(rows[0].textContent).toContain('bastion → gateway')
-    expect(rows[1].textContent).toContain('—')
+    expect(rows).toHaveLength(2)
+    // Default sort is alias asc: db-1 first, web-1 (with the jump chain) second.
+    expect(rows[0]!.textContent).toContain('—')
+    expect(rows[1]!.textContent).toContain('bastion → gateway')
   })
 })

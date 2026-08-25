@@ -59,6 +59,33 @@ export function groupHosts(hosts: SshHostSummary[], groupBy: HostGroupBy): HostG
     .map(([key, group]) => ({ key, hosts: group }))
 }
 
+/** Sortable host columns. */
+export type HostSortKey = 'alias' | 'host' | 'port' | 'user' | 'auth' | 'jump' | 'environment' | 'tags' | 'description'
+
+/** Every sortable column, in table order (used for the header buttons). */
+export const HOST_SORT_KEYS: HostSortKey[] = ['alias', 'host', 'user', 'auth', 'jump', 'environment', 'tags', 'description']
+
+/** Compare two hosts for one sort key. */
+function compareHosts(a: SshHostSummary, b: SshHostSummary, key: HostSortKey): number {
+  switch (key) {
+    case 'alias': return a.alias.localeCompare(b.alias)
+    case 'host': return (a.host + ':' + a.port).localeCompare(b.host + ':' + b.port)
+    case 'port': return a.port - b.port
+    case 'user': return a.user.localeCompare(b.user)
+    case 'auth': return a.auth.localeCompare(b.auth)
+    case 'jump': return a.proxyJump.join(' → ').localeCompare(b.proxyJump.join(' → '))
+    case 'environment': return (a.environment ?? '').localeCompare(b.environment ?? '')
+    case 'tags': return a.tags.join(',').localeCompare(b.tags.join(','))
+    case 'description': return (a.description ?? '').localeCompare(b.description ?? '')
+  }
+}
+
+/** Sort a host list by key/direction (ascending by default). */
+export function sortHosts(hosts: SshHostSummary[], key: HostSortKey, dir: 'asc' | 'desc'): SshHostSummary[] {
+  const factor = dir === 'desc' ? -1 : 1
+  return [...hosts].sort((a, b) => compareHosts(a, b, key) * factor)
+}
+
 /** The hosts table plus its toolbar and dialogs. */
 export function HostsTab({ api, onConnect }: HostsTabProps) {
   const [hosts, setHosts] = useState<SshHostSummary[] | null>(null)
@@ -72,6 +99,9 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
   const [groupBy, setGroupBy] = useState<HostGroupBy>('none')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [testingGroup, setTestingGroup] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<HostSortKey>('alias')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const seqRef = useRef(0)
   // Unmount guard for the async load below: the seq check only orders
   // overlapping loads, it does not stop a late resolution/rejection landing
@@ -136,6 +166,54 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
     }
   }
 
+  /** Toggle one row in the batch selection. */
+  const toggleSelected = (alias: string): void => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(alias)) next.delete(alias)
+      else next.add(alias)
+      return next
+    })
+  }
+
+  /** Select/deselect every visible host. */
+  const toggleAll = (): void => {
+    if (hosts === null) return
+    setSelected(prev => prev.size === hosts.length ? new Set() : new Set(hosts.map(host => host.alias)))
+  }
+
+  /** Batch action: test every selected host. */
+  const runBatchTest = async (): Promise<void> => {
+    for (const alias of [...selected]) {
+      await runTest(alias)
+    }
+  }
+
+  /** Batch action: delete every selected host (one confirmation). */
+  const runBatchDelete = async (): Promise<void> => {
+    if (!window.confirm(tt('hosts.batch.deleteConfirm', { count: selected.size }))) return
+    const aliases = [...selected]
+    for (const alias of aliases) {
+      try {
+        await api.deleteHost(alias)
+      } catch (cause) {
+        if (mountedRef.current) setError(errorMessage(cause))
+      }
+    }
+    setSelected(new Set())
+    if (mountedRef.current) void load()
+  }
+
+  /** Cycle a column's sort direction. */
+  const toggleSort = (key: HostSortKey): void => {
+    if (sortKey === key) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
   // Group-header batch action (#379): test every host in the group.
   const testGroup = async (group: HostGroup): Promise<void> => {
     if (!mountedRef.current) return
@@ -167,6 +245,14 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
     const test = testResults[host.alias]
     return (
       <tr key={host.alias}>
+        <td className={css.checkCell}>
+          <input
+            type="checkbox"
+            aria-label={tt('hosts.selectRow', { alias: host.alias })}
+            checked={selected.has(host.alias)}
+            onChange={() => { toggleSelected(host.alias) }}
+          />
+        </td>
         <td className={css.mono}>{host.alias}</td>
         <td className={css.mono}>{host.host}:{host.port}</td>
         <td>{host.user}</td>
@@ -195,18 +281,41 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
     )
   }
 
+  /** One sortable header cell (click cycles asc/desc). */
+  const sortHeader = (key: HostSortKey, label: string): ReactNode => (
+    <th>
+      <button
+        type="button"
+        className={css.sortButton}
+        data-active={sortKey === key || undefined}
+        onClick={() => { toggleSort(key) }}
+      >
+        {label}
+        <span className={css.sortIndicator} data-dir={sortKey === key ? sortDir : undefined} aria-hidden="true">▾</span>
+      </button>
+    </th>
+  )
+
   const renderHostTable = (rows: SshHostSummary[]): ReactNode => (
     <table className={css.table}>
       <thead>
         <tr>
-          <th>{tt('hosts.col.alias')}</th>
-          <th>{tt('hosts.col.host')}</th>
-          <th>{tt('hosts.col.user')}</th>
-          <th>{tt('hosts.col.auth')}</th>
-          <th>{tt('hosts.col.jump')}</th>
-          <th>{tt('hosts.col.environment')}</th>
-          <th>{tt('hosts.col.tags')}</th>
-          <th>{tt('hosts.col.description')}</th>
+          <th className={css.checkCell}>
+            <input
+              type="checkbox"
+              aria-label={tt('hosts.selectAll')}
+              checked={hosts !== null && hosts.length > 0 && selected.size === hosts.length}
+              onChange={() => { toggleAll() }}
+            />
+          </th>
+          {sortHeader('alias', tt('hosts.col.alias'))}
+          {sortHeader('host', tt('hosts.col.host'))}
+          {sortHeader('user', tt('hosts.col.user'))}
+          {sortHeader('auth', tt('hosts.col.auth'))}
+          {sortHeader('jump', tt('hosts.col.jump'))}
+          {sortHeader('environment', tt('hosts.col.environment'))}
+          {sortHeader('tags', tt('hosts.col.tags'))}
+          {sortHeader('description', tt('hosts.col.description'))}
           <th>{tt('hosts.col.actions')}</th>
         </tr>
       </thead>
@@ -216,7 +325,9 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
     </table>
   )
 
-  const groups = hosts === null ? [] : groupHosts(hosts, groupBy)
+  const sorted = hosts === null ? null : sortHosts(hosts, sortKey, sortDir)
+  const groups = sorted === null ? [] : groupHosts(sorted, groupBy)
+  const batchCount = selected.size
 
   return (
     <div className={css.fillBody}>
@@ -233,6 +344,13 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
           ]}
         />
         <div className={css.toolbarSpacer} />
+        {batchCount > 0 && (
+          <>
+            <span className={css.batchCount}>{tt('hosts.batch.selected', { count: batchCount })}</span>
+            <button type="button" className={css.ghostButton} disabled={testingAlias !== null} onClick={() => { void runBatchTest() }}>{tt('hosts.batch.test')}</button>
+            <button type="button" className={css.ghostButton} data-danger onClick={() => { void runBatchDelete() }}>{tt('hosts.batch.delete')}</button>
+          </>
+        )}
         <button type="button" className={css.primaryButton} onClick={() => { setDialog({ mode: 'create' }) }}>{tt('hosts.add')}</button>
         <button type="button" className={css.ghostButton} disabled={importing} onClick={() => { void importConfig() }}>{importing ? tt('common.loading') : tt('hosts.import')}</button>
       </div>
@@ -240,9 +358,9 @@ export function HostsTab({ api, onConnect }: HostsTabProps) {
       {error !== null && <div className={css.banner} data-kind="error">{tt('common.error', { error })}</div>}
       {hosts === null && error === null && <div className={css.loading}>{tt('common.loading')}</div>}
       {hosts !== null && hosts.length === 0 && <div className={css.empty}>{tt('hosts.empty')}</div>}
-      {hosts !== null && hosts.length > 0 && groupBy === 'none' && (
+      {sorted !== null && sorted.length > 0 && groupBy === 'none' && (
         <div className={css.tableWrap}>
-          {renderHostTable(hosts)}
+          {renderHostTable(sorted)}
         </div>
       )}
       {hosts !== null && hosts.length > 0 && groupBy !== 'none' && (

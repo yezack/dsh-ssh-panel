@@ -415,11 +415,12 @@ const maxUploadBytes = deps.maxUploadBytes ?? MAX_UPLOAD_BYTES
           // Pre-create with 0600: ssh2's fastGet opens the destination with
           // umask-default permissions and a pre-created file keeps the mode.
           closeSync(openSync(tmp, 'w', 0o600))
-          const outcome = await engine.download(alias, remotePath, tmp)
+          const outcome = await engine.downloadTree(alias, remotePath, tmp)
+          const filename = outcome.name.replace(/"/g, '')
           res.writeHead(200, {
             'content-type': 'application/octet-stream',
             'content-length': String(outcome.bytes),
-            'content-disposition': `attachment; filename="${basename(remotePath).replace(/"/g, '')}"`,
+            'content-disposition': `attachment; filename="${filename}"`,
             'referrer-policy': 'no-referrer',
           })
           await new Promise<void>((resolve, reject) => {

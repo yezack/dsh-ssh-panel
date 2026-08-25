@@ -78,11 +78,13 @@ export function SshPanel({ controller, api, terminalFont }: SshPanelProps) {
         ))}
       </div>
       <div className={css.panelContent}>
-        {activeTab === 'hosts' && <HostsTab api={api} onConnect={handleConnect} />}
-        {activeTab === 'terminal' && <TerminalTab api={api} presetAlias={connectRequest?.alias} requestId={connectRequest?.nonce} terminalFont={terminalFont} />}
-        {activeTab === 'transfer' && <TransferTab api={api} />}
-        {activeTab === 'tunnels' && <TunnelsTab api={api} />}
-        {activeTab === 'cluster' && <ClusterTab api={api} />}
+        {/* Tabs stay mounted; inactive ones are hidden with CSS so live
+            terminal sessions and in-flight state survive tab switches. */}
+        <div className={activeTab === 'hosts' ? css.panelTab : css.panelTabHidden}><HostsTab api={api} onConnect={handleConnect} /></div>
+        <div className={activeTab === 'terminal' ? css.panelTab : css.panelTabHidden}><TerminalTab api={api} presetAlias={connectRequest?.alias} requestId={connectRequest?.nonce} terminalFont={terminalFont} /></div>
+        <div className={activeTab === 'transfer' ? css.panelTab : css.panelTabHidden}><TransferTab api={api} /></div>
+        <div className={activeTab === 'tunnels' ? css.panelTab : css.panelTabHidden}><TunnelsTab api={api} /></div>
+        <div className={activeTab === 'cluster' ? css.panelTab : css.panelTabHidden}><ClusterTab api={api} /></div>
       </div>
     </div>
   )

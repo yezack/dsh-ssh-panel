@@ -71,8 +71,8 @@ describe('TerminalTab dispose and resize cleanup', () => {
     // subscription. Assert that the source wires both disposes so a future
     // refactor cannot silently drop them.
     const source = readFileSync(join(process.cwd(), 'src', 'client', 'panel', 'TerminalTab.tsx'), 'utf8')
-    expect(source).toContain('dataSubRef.current?.dispose()')
-    expect(source).toContain('termRef.current?.dispose()')
+    expect(source).toContain('session.dataSub?.dispose()')
+    expect(source).toContain('session.term.dispose()')
     expect(source).toContain('window.removeEventListener(\'resize\', sync)')
   })
 

@@ -1,9 +1,11 @@
 /**
- * Terminal tab: an xterm.js PTY view over the host's WebSocket terminal route.
- * A host <select> plus connect/disconnect controls; the terminal container is
- * sized by FitAddon (default 80x24 before first fit). On remote exit the last
- * output stays visible and input is disabled. xterm's stylesheet is injected
- * once per page load (module-level guard).
+ * Terminal tab: xterm.js PTY sessions over the host's WebSocket terminal route.
+ * A host picker plus a session bar: 「连接」opens a NEW session for the picked
+ * host, so multiple sessions run side by side. Sessions survive tab switches
+ * (SshPanel hides inactive tabs instead of unmounting them). A session that
+ * drops with a transport error auto-reconnects with backoff (up to
+ * MAX_RECONNECTS attempts); a clean exit just ends the session. Right-click
+ * on the live terminal opens a copy / paste / interrupt (Ctrl+C) / clear menu.
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
 import { Terminal, type IDisposable } from '@xterm/xterm'
@@ -29,13 +31,30 @@ export interface TerminalTabProps {
   terminalFont?: TerminalFontSource
 }
 
+/** Max auto-reconnect attempts per session (transport errors only). */
+const MAX_RECONNECTS = 3
+/** Backoff base: reconnect delays are 1s, 2s, 4s. */
+const RECONNECT_BASE_MS = 1000
+
 /** The terminal session lifecycle state shown in the status banner. */
-type TerminalStatus =
-  | { kind: 'idle' }
-  | { kind: 'connecting' }
-  | { kind: 'connected'; alias: string }
-  | { kind: 'exited'; alias: string; detail?: string }
-  | { kind: 'error'; detail: string }
+type SessionStatus = 'connecting' | 'connected' | 'exited'
+
+/** One live PTY session: its xterm instance plus the WebSocket connection. */
+interface TermSession {
+  id: number
+  alias: string
+  term: Terminal
+  fit: FitAddon
+  conn: TerminalConnection | null
+  dataSub: IDisposable | null
+  selectionSub: IDisposable | null
+  status: SessionStatus
+  error?: string
+  reconnectAttempts: number
+  reconnectTimer?: ReturnType<typeof setTimeout>
+  /** Guards the exit handler against double delivery (onclose + onerror). */
+  exited: boolean
+}
 
 /** Injected-once guard for the xterm stylesheet (one tag per page load). */
 let xtermCssInjected = false
@@ -60,34 +79,32 @@ const NO_FONT_SOURCE: TerminalFontSource = {
 export function TerminalTab({ api, presetAlias, requestId, terminalFont }: TerminalTabProps) {
   const [hosts, setHosts] = useState<SshHostSummary[]>([])
   const [alias, setAlias] = useState(presetAlias ?? '')
-  const [status, setStatus] = useState<TerminalStatus>({ kind: 'idle' })
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const connRef = useRef<TerminalConnection | null>(null)
-  const dataSubRef = useRef<IDisposable | null>(null)
-  const selectionSubRef = useRef<IDisposable | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  // Right-click menu on the live terminal: copy (enabled only when xterm has
-  // a selection) and paste (writes the clipboard into the PTY).
+  const [sessions, setSessions] = useState<TermSession[]>([])
+  const [listError, setListError] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<number | null>(null)
   const [selectionActive, setSelectionActive] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const nextSessionId = useRef(1)
+  const sessionsRef = useRef<TermSession[]>([])
+  sessionsRef.current = sessions
   const fontSource = terminalFont ?? NO_FONT_SOURCE
   const fontOverride = useSyncExternalStore(fontSource.subscribe, fontSource.get)
 
+  const activeSession = sessions.find(session => session.id === activeId) ?? null
+
   useEffect(() => { ensureXtermCss() }, [])
 
-  // Live re-apply a terminal-font change (issue #577): xterm re-measures
-  // and repaints on the options write; a refit keeps cols/rows aligned with
-  // the new metrics and the remote PTY learns the new size.
+  // Live re-apply a terminal-font change (issue #577) to every session.
   useEffect(() => {
-    const term = termRef.current
-    if (term === null) return
     const next = resolveTerminalFontFamily(fontOverride)
-    if (term.options.fontFamily === next) return
-    term.options.fontFamily = next
-    fitRef.current?.fit()
-    connRef.current?.resize(term.cols, term.rows)
+    for (const session of sessionsRef.current) {
+      if (session.term.options.fontFamily === next) continue
+      session.term.options.fontFamily = next
+      session.fit.fit()
+      session.conn?.resize(session.term.cols, session.term.rows)
+    }
   }, [fontOverride])
 
   // Fetch the host list on tab activation.
@@ -98,16 +115,13 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
         const list = await api.listHosts()
         if (!disposed) setHosts(list)
       } catch (cause) {
-        if (!disposed) setStatus({ kind: 'error', detail: errorMessage(cause) })
+        if (!disposed) setListError(errorMessage(cause))
       }
     })()
     return () => { disposed = true }
   }, [api])
 
-  // A hosts-tab connect action preselects its alias here and connects
-  // immediately — one click in the host list must reach a live shell without
-  // a second "Connect" press. The timeout defers past the commit so the
-  // terminal container is guaranteed to exist.
+  // A hosts-tab connect action opens a new session for its alias.
   useEffect(() => {
     if (presetAlias === undefined || requestId === undefined) return
     setAlias(presetAlias)
@@ -115,52 +129,176 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     return () => { clearTimeout(timer) }
   }, [presetAlias, requestId])
 
-  const teardown = (): void => {
-    const connection = connRef.current
-    connRef.current = null
+  /** Show one session's xterm element; hide the others (all live in the container). */
+  const showSession = (target: TermSession): void => {
+    const all = [...sessionsRef.current.filter(session => session.id !== target.id), target]
+    for (const session of all) {
+      const element = session.term.element
+      if (element === undefined) continue
+      element.style.display = session.id === target.id ? '' : 'none'
+    }
+    target.fit.fit()
+    target.conn?.resize(target.term.cols, target.term.rows)
+  }
+
+  const activateSession = (id: number): void => {
+    const session = sessionsRef.current.find(candidate => candidate.id === id)
+    if (session === undefined) return
+    setActiveId(id)
+    setSelectionActive(session.term.hasSelection())
+    showSession(session)
+  }
+
+  /** Mutate a session and push the array reference so React re-renders. */
+  const syncSessions = (): void => {
+    setSessions([...sessionsRef.current])
+  }
+
+  const openTerminalFor = (session: TermSession, target: string): void => {
+    const connection = api.openTerminal(target, session.term.cols, session.term.rows)
+    session.conn = connection
+    session.exited = false
+    session.status = 'connecting'
+    session.error = undefined
+    session.dataSub?.dispose()
+    session.dataSub = session.term.onData(data => { connection.send(data) })
+    session.selectionSub?.dispose()
+    session.selectionSub = session.term.onSelectionChange(() => {
+      setSelectionActive(session.term.hasSelection())
+    })
+    connection.onReady = () => {
+      session.status = 'connected'
+      session.reconnectAttempts = 0
+      syncSessions()
+    }
+    connection.onOutput = data => { session.term.write(data) }
+    connection.onExit = (code, error) => { handleSessionExit(session, code, error) }
+    // No sync here on purpose: createSession appends this session to the
+    // state first, and syncing here would clobber the pending append with the
+    // (stale) pre-render array. The onReady/onExit handlers sync later.
+  }
+
+  const handleSessionExit = (session: TermSession, _code: number | null, error: string | undefined): void => {
+    if (session.exited) return
+    session.exited = true
+    session.conn = null
+    if (error !== undefined && session.reconnectAttempts < MAX_RECONNECTS) {
+      // Transport error (ws closed unexpectedly): auto-reconnect with backoff.
+      session.reconnectAttempts += 1
+      session.status = 'connecting'
+      session.error = undefined
+      syncSessions()
+      const delay = RECONNECT_BASE_MS * 2 ** (session.reconnectAttempts - 1)
+      session.reconnectTimer = setTimeout(() => {
+        const live = sessionsRef.current.find(candidate => candidate.id === session.id)
+        if (live === undefined || live.conn !== null) return
+        try {
+          openTerminalFor(live, live.alias)
+        } catch (cause) {
+          handleSessionExit(live, null, errorMessage(cause))
+        }
+      }, delay)
+      return
+    }
+    session.status = 'exited'
+    session.error = error
+    session.term.options.disableStdin = true
+    if (activeId === session.id) setSelectionActive(false)
+    syncSessions()
+  }
+
+  const teardownSession = (session: TermSession): void => {
+    if (session.reconnectTimer !== undefined) clearTimeout(session.reconnectTimer)
+    session.reconnectTimer = undefined
+    const connection = session.conn
+    session.conn = null
     if (connection !== null) {
       connection.onReady = undefined
       connection.onOutput = undefined
       connection.onExit = undefined
       connection.close()
     }
-    // Release the xterm subscriptions explicitly and dispose the terminal
-    // so no listener (or the terminal Renderer) survives a disconnect or
-    // the tab unmounting.
-    dataSubRef.current?.dispose()
-    dataSubRef.current = null
-    selectionSubRef.current?.dispose()
-    selectionSubRef.current = null
-    termRef.current?.dispose()
-    termRef.current = null
-    fitRef.current = null
-    setSelectionActive(false)
-    setContextMenu(null)
+    session.dataSub?.dispose()
+    session.dataSub = null
+    session.selectionSub?.dispose()
+    session.selectionSub = null
+    try { session.term.dispose() } catch { /* already gone */ }
   }
 
-  // Unmount cleanup (never touches state on an unmounting component).
-  useEffect(() => () => { teardown() }, [])
+  /** Open a brand-new session for the given alias. */
+  const createSession = (target: string): void => {
+    const container = containerRef.current
+    if (target === '' || container === null) return
+    const id = nextSessionId.current
+    nextSessionId.current += 1
+    const term = new Terminal({
+      convertEol: false,
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: resolveTerminalFontFamily(fontOverride),
+      theme: { background: '#0b0e14', foreground: '#d8dee9', cursor: '#a3b8d0' },
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(container)
+    fit.fit()
+    const session: TermSession = {
+      id,
+      alias: target,
+      term,
+      fit,
+      conn: null,
+      dataSub: null,
+      selectionSub: null,
+      status: 'connecting',
+      reconnectAttempts: 0,
+      exited: false,
+    }
+    setSessions(prev => [...prev, session])
+    setActiveId(id)
+    setSelectionActive(false)
+    showSession(session)
+    openTerminalFor(session, target)
+  }
 
-  // Keep the terminal fitted to its container. A window resize is only one
-  // trigger: the status banner appearing after connect, panel resizes, and
-  // sidebar toggles all change the container without a window resize, so the
-  // container itself is observed (otherwise the viewport keeps the pre-banner
-  // height and the last line is clipped below the fold). ResizeObserver may
-  // be absent (jsdom tests); the window listener then remains the only path.
+  const closeSession = (id: number): void => {
+    const session = sessionsRef.current.find(candidate => candidate.id === id)
+    if (session === undefined) return
+    teardownSession(session)
+    const remaining = sessionsRef.current.filter(candidate => candidate.id !== id)
+    setSessions(remaining)
+    if (activeId === id) {
+      const next = remaining.length > 0 ? remaining[remaining.length - 1]! : null
+      setActiveId(next === null ? null : next.id)
+      setSelectionActive(false)
+      if (next !== null) showSession(next)
+    }
+  }
+
+  const connect = (): void => { createSession(alias) }
+
+  // The hosts-tab connect action fires from an effect; keep the latest
+  // createSession in a ref so the timer never calls a stale closure.
+  const connectToRef = useRef<(alias: string) => void>(() => undefined)
+  connectToRef.current = createSession
+
+  const disconnect = (): void => {
+    if (activeSession !== null) closeSession(activeSession.id)
+  }
+
+  // Unmount cleanup: tear down every session (never touches state).
+  useEffect(() => () => {
+    for (const session of sessionsRef.current) teardownSession(session)
+  }, [])
+
+  // Keep the active terminal fitted to its container.
   useEffect(() => {
-    let lastCols = -1
-    let lastRows = -1
     const sync = (): void => {
-      const term = termRef.current
-      const fit = fitRef.current
-      if (term === null || fit === null) return
-      fit.fit()
-      const conn = connRef.current
-      if (conn !== null && (term.cols !== lastCols || term.rows !== lastRows)) {
-        lastCols = term.cols
-        lastRows = term.rows
-        conn.resize(term.cols, term.rows)
-      }
+      const session = sessionsRef.current.find(candidate => candidate.id === activeId) ?? null
+      if (session === null) return
+      session.fit.fit()
+      const conn = session.conn
+      if (conn !== null) conn.resize(session.term.cols, session.term.rows)
     }
     window.addEventListener('resize', sync)
     const container = containerRef.current
@@ -173,65 +311,9 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
       observer.disconnect()
       window.removeEventListener('resize', sync)
     }
-  }, [])
+  }, [activeId])
 
-  /** Open the PTY for an explicit alias (used by the connect button and the
-   *  hosts-tab auto-connect path). */
-  const connectTo = (target: string): void => {
-    const container = containerRef.current
-    if (target === '' || container === null) return
-    if (status.kind === 'connecting' || status.kind === 'connected') return
-    teardown()
-    setStatus({ kind: 'connecting' })
-    const term = new Terminal({
-      convertEol: false,
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: resolveTerminalFontFamily(fontOverride),
-      theme: { background: '#0b0e14', foreground: '#d8dee9', cursor: '#a3b8d0' },
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(container)
-    fit.fit()
-    const connection = api.openTerminal(target, term.cols, term.rows)
-    termRef.current = term
-    fitRef.current = fit
-    connRef.current = connection
-    let settled = false
-    dataSubRef.current = term.onData(data => { connection.send(data) })
-    // Track xterm's selection so the context menu's copy item can enable
-    // itself only when text is actually selected.
-    selectionSubRef.current = term.onSelectionChange(() => { setSelectionActive(term.hasSelection()) })
-    connection.onReady = () => { setStatus({ kind: 'connected', alias: target }) }
-    connection.onOutput = data => { term.write(data) }
-    connection.onExit = (_code, error) => {
-      if (settled) return
-      settled = true
-      dataSubRef.current?.dispose()
-      dataSubRef.current = null
-      term.options.disableStdin = true
-      connRef.current = null
-      // Keep the last output visible; input is now disabled.
-      setStatus({ kind: 'exited', alias: target, detail: error })
-    }
-  }
-
-  const connect = (): void => { connectTo(alias) }
-
-  // The hosts-tab connect action fires the auto-connect from an effect; keep
-  // the latest connectTo in a ref so the timer never calls a stale closure.
-  const connectToRef = useRef<(alias: string) => void>(() => undefined)
-  connectToRef.current = connectTo
-
-  const disconnect = (): void => {
-    teardown()
-    setStatus({ kind: 'idle' })
-  }
-
-  const active = status.kind === 'connecting' || status.kind === 'connected'
-  // A live session only: the menu is pointless while the shell is gone.
-  const sessionLive = connRef.current !== null && termRef.current !== null
+  const sessionLive = activeSession !== null && activeSession.conn !== null
 
   /** Right-click on the live terminal: open the copy/paste menu, no browser menu. */
   const handleContextMenu = (event: ReactMouseEvent): void => {
@@ -239,14 +321,14 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     event.preventDefault()
     setContextMenu({
       x: Math.min(event.clientX, window.innerWidth - 150),
-      y: Math.min(event.clientY, window.innerHeight - 90),
+      y: Math.min(event.clientY, window.innerHeight - 110),
     })
   }
 
-  /** Copy the xterm selection into the clipboard. */
+  /** Copy the active session's selection into the clipboard. */
   const copySelection = async (): Promise<void> => {
-    const term = termRef.current
-    if (term === null || !term.hasSelection()) return
+    const term = activeSession?.term
+    if (term === undefined || !term.hasSelection()) return
     const text = term.getSelection()
     try {
       await navigator.clipboard.writeText(text)
@@ -267,10 +349,10 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     textarea.remove()
   }
 
-  /** Paste the clipboard into the remote PTY. */
+  /** Paste the clipboard into the active session's remote PTY. */
   const pasteClipboard = async (): Promise<void> => {
-    const connection = connRef.current
-    if (connection === null) return
+    const connection = activeSession?.conn
+    if (connection === null || connection === undefined) return
     let text = ''
     try {
       text = await navigator.clipboard.readText()
@@ -278,6 +360,16 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
       return
     }
     if (text !== '') connection.send(text)
+  }
+
+  /** Send SIGINT (Ctrl+C) to the active session. */
+  const sendInterrupt = (): void => {
+    activeSession?.conn?.send('\x03')
+  }
+
+  /** Clear the active session's screen (xterm buffer). */
+  const clearScreen = (): void => {
+    activeSession?.term.clear()
   }
 
   // Close the context menu on outside mousedown or Escape.
@@ -297,6 +389,8 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     }
   }, [contextMenu])
 
+  const reconnecting = activeSession !== null && activeSession.status === 'connecting' && activeSession.reconnectAttempts > 0
+
   return (
     <div className={css.termBody}>
       <div className={css.controls}>
@@ -309,19 +403,57 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
             ...hosts.map(host => ({ value: host.alias, label: host.alias + ' (' + host.host + ')' })),
           ]}
         />
-        <button type="button" className={css.primaryButton} disabled={alias === '' || active} onClick={connect}>{tt('terminal.connect')}</button>
-        <button type="button" className={css.ghostButton} disabled={!active} onClick={disconnect}>{tt('terminal.disconnect')}</button>
+        <button type="button" className={css.primaryButton} disabled={alias === ''} onClick={connect}>{tt('terminal.connect')}</button>
+        <button type="button" className={css.ghostButton} disabled={activeSession === null} onClick={disconnect}>{tt('terminal.disconnect')}</button>
       </div>
-      {status.kind === 'connecting' && <div className={css.banner} data-kind="info">{tt('terminal.connecting')}</div>}
-      {status.kind === 'connected' && <div className={css.banner} data-kind="ok">{tt('terminal.ready', { alias: status.alias })}</div>}
-      {status.kind === 'exited' && (
-        <div className={css.banner} data-kind="info">{tt('terminal.exited', { alias: status.alias })}{status.detail !== undefined ? ' (' + status.detail + ')' : ''}</div>
+      {sessions.length > 0 && (
+        <div className={css.sessionBar} role="tablist" aria-label={tt('terminal.sessions')}>
+          {sessions.map(session => {
+            const active = session.id === activeId
+            return (
+              <div key={session.id} className={active ? css.sessionChip + ' ' + css.sessionChipActive : css.sessionChip}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={css.sessionChipMain}
+                  onClick={() => { activateSession(session.id) }}
+                >
+                  <span className={css.sessionChipDot} data-status={session.status} aria-hidden="true" />
+                  <span className={css.sessionChipAlias}>{session.alias}</span>
+                  {session.reconnectAttempts > 0 && <span className={css.sessionChipRetry}>({session.reconnectAttempts}/{MAX_RECONNECTS})</span>}
+                </button>
+                <button
+                  type="button"
+                  className={css.sessionChipClose}
+                  aria-label={tt('terminal.sessionClose', { alias: session.alias })}
+                  onClick={() => { closeSession(session.id) }}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
       )}
-      {status.kind === 'error' && <div className={css.banner} data-kind="error">{tt('terminal.error', { error: status.detail })}</div>}
+      {activeSession !== null && activeSession.status === 'connecting' && !reconnecting && (
+        <div className={css.banner} data-kind="info">{tt('terminal.connecting')}</div>
+      )}
+      {reconnecting && (
+        <div className={css.banner} data-kind="info">{tt('terminal.reconnecting', { attempt: activeSession!.reconnectAttempts, max: MAX_RECONNECTS })}</div>
+      )}
+      {activeSession !== null && activeSession.status === 'connected' && (
+        <div className={css.banner} data-kind="ok">{tt('terminal.ready', { alias: activeSession.alias })}</div>
+      )}
+      {activeSession !== null && activeSession.status === 'exited' && (
+        <div className={css.banner} data-kind="info">{tt('terminal.exited', { alias: activeSession.alias })}{activeSession.error !== undefined ? ' (' + activeSession.error + ')' : ''}</div>
+      )}
+      {listError !== null && <div className={css.banner} data-kind="error">{tt('terminal.error', { error: listError })}</div>}
+      {sessions.length === 0 && hosts.length === 0 && listError === null && <div className={css.banner} data-kind="info">{tt('hosts.empty')}</div>}
       <div className={css.termWrap} onContextMenu={handleContextMenu}>
         <div ref={containerRef} className={css.termContainer} data-dsh-part="terminal" />
-        {status.kind === 'idle' && (
-          <div className={css.termPlaceholder}>{hosts.length === 0 ? tt('hosts.empty') : tt('terminal.placeholder')}</div>
+        {sessions.length === 0 && hosts.length > 0 && (
+          <div className={css.termPlaceholder}>{tt('terminal.placeholder')}</div>
         )}
       </div>
       {contextMenu !== null && sessionLive && (
@@ -349,6 +481,22 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
             onClick={() => { setContextMenu(null); void pasteClipboard() }}
           >
             {tt('terminal.menu.paste')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={css.termMenuItem}
+            onClick={() => { setContextMenu(null); sendInterrupt() }}
+          >
+            {tt('terminal.menu.interrupt')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={css.termMenuItem}
+            onClick={() => { setContextMenu(null); clearScreen() }}
+          >
+            {tt('terminal.menu.clear')}
           </button>
         </div>
       )}

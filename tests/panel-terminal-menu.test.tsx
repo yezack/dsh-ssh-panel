@@ -18,9 +18,10 @@ type MockTerm = {
   getSelection(): string
 }
 
-const { terminalInstances, selection } = vi.hoisted(() => ({
+const { terminalInstances, selection, clearCount } = vi.hoisted(() => ({
   terminalInstances: [] as MockTerm[],
   selection: { active: false, text: '' },
+  clearCount: { value: 0 },
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -39,6 +40,7 @@ vi.mock('@xterm/xterm', () => ({
     }
     hasSelection(): boolean { return selection.active }
     getSelection(): string { return selection.text }
+    clear(): void { clearCount.value += 1 }
   },
 }))
 
@@ -53,6 +55,7 @@ afterEach(() => {
   terminalInstances.length = 0
   selection.active = false
   selection.text = ''
+  clearCount.value = 0
   document.body.replaceChildren()
 })
 
@@ -137,6 +140,25 @@ describe('TerminalTab right-click menu', () => {
     await act(async () => { copyItem.click() })
     await act(async () => { await Promise.resolve() })
     expect(writeText).toHaveBeenCalledWith('selected-line')
+
+    await act(async () => { root.unmount() })
+  })
+
+  it('sends Ctrl+C on interrupt and clears the screen', async () => {
+    const { container, root, send } = await renderConnected()
+
+    rightClick(container)
+    let menu = container.querySelector('[class*="termMenu"]') as HTMLElement
+    const interruptItem = [...menu.querySelectorAll('button')]
+      .find(button => button.textContent === '发送中断 (Ctrl+C)') as HTMLButtonElement
+    await act(async () => { interruptItem.click() })
+    expect(send).toHaveBeenCalledWith('\x03')
+
+    rightClick(container)
+    menu = container.querySelector('[class*="termMenu"]') as HTMLElement
+    const clearItem = [...menu.querySelectorAll('button')].find(button => button.textContent === '清屏') as HTMLButtonElement
+    await act(async () => { clearItem.click() })
+    expect(clearCount.value).toBe(1)
 
     await act(async () => { root.unmount() })
   })

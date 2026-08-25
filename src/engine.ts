@@ -17,8 +17,8 @@ import {
   type PoolRecord,
 } from './engine/connection-pool.ts'
 import { openShell, type ShellSession } from './engine/pty.ts'
-import { download, ls, upload } from './engine/sftp.ts'
-import { listTunnels, startTunnel, stopAllTunnels, stopTunnel, type TunnelRecord } from './engine/tunnel.ts'
+import { download, downloadTree, ls, upload } from './engine/sftp.ts'
+import { listTunnels, persistTunnelSpecs, readTunnelSpecs, startTunnel, stopAllTunnels, stopTunnel, type TunnelRecord } from './engine/tunnel.ts'
 import { cluster } from './engine/cluster.ts'
 
 export type { EngineOptions } from './engine/connection-pool.ts'
@@ -36,18 +36,39 @@ export class SshEngine {
   readonly pool = new Map<string, PoolRecord>()
   readonly acquireQueue = new Map<string, Promise<PoolRecord>>()
   readonly tunnels = new Map<string, TunnelRecord>()
+  readonly tunnelSpecPath: string | undefined
   nextTunnelId = 1
   private sweepTimer: NodeJS.Timeout | undefined
 
   /**
    * @param store - the host config store.
    * @param options - engine knobs (defaults applied).
+   * @param tunnelSpecPath - optional persistence file for tunnels; when set,
+   * active tunnels survive restarts (restored on construction).
    */
-  constructor(store: HostStore, options?: EngineOptions) {
+  constructor(store: HostStore, options?: EngineOptions, tunnelSpecPath?: string) {
     this.store = store
     this.opts = { ...DEFAULTS, ...options }
+    this.tunnelSpecPath = tunnelSpecPath
     this.sweepTimer = setInterval(() => sweepPool(this), Math.max(10_000, this.opts.idleTimeoutMs / 4))
     this.sweepTimer.unref?.()
+    if (tunnelSpecPath !== undefined) this.restoreTunnels()
+  }
+
+  /** Re-start every persisted tunnel (best-effort; failures are dropped). */
+  private restoreTunnels(): void {
+    for (const spec of readTunnelSpecs(this.tunnelSpecPath as string)) {
+      void startTunnel(this, spec.alias, {
+        remoteHost: spec.remoteHost,
+        remotePort: spec.remotePort,
+        localPort: spec.localPort,
+      }).catch((error) => {
+        // A failed restore (host deleted, port taken) must not block startup;
+        // rewrite the persisted list without it so it is not retried forever.
+        console.error('dsh-ssh: failed to restore tunnel ' + spec.alias + ':' + spec.remotePort + ' — ' + (error instanceof Error ? error.message : String(error)))
+        persistTunnelSpecs(this)
+      })
+    }
   }
 
   // ---------------------------------------------------------------- config
@@ -103,9 +124,14 @@ export class SshEngine {
     return upload(this, alias, localPath, remotePath, recursive, onProgress)
   }
 
-  /** Download one remote file to a local path. */
+  /** Download one remote file to a local path (directories rejected). */
   async download(alias: string, remotePath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<{ bytes: number }> {
     return download(this, alias, remotePath, localPath, onProgress)
+  }
+
+  /** Download one remote path to a local file (directories stream as tar.gz). */
+  async downloadTree(alias: string, remotePath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<{ bytes: number; files: number; isDirectory: boolean; name: string }> {
+    return downloadTree(this, alias, remotePath, localPath, onProgress)
   }
 
   /** List a remote directory (file browser). */

@@ -4,8 +4,9 @@
  * released exactly once so sshd's MaxSessions cap is never exhausted.
  */
 
-import { existsSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, relative, resolve as resolvePath } from 'node:path'
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve as resolvePath } from 'node:path'
+import { createGzip } from 'node:zlib'
 import { Client, type SFTPWrapper } from 'ssh2'
 import type { RemoteDirEntry, TransferProgress } from '../protocol.ts'
 import { withClient, type PoolEngine } from './connection-pool.ts'
@@ -69,7 +70,81 @@ export async function upload(
   }))
 }
 
-/** Download one remote file to a local path. */
+/**
+ * Download one remote path to a local file. A plain file downloads as-is; a
+ * directory is streamed into a gzip-compressed tar archive at `localPath`
+ * (dependency-free USTAR writer), so the whole tree comes down in one file.
+ * @returns byte count, file count, whether the source was a directory, and
+ * the suggested download name.
+ */
+export async function downloadTree(
+  engine: PoolEngine,
+  alias: string,
+  remotePath: string,
+  localPath: string,
+  onProgress?: (progress: TransferProgress) => void,
+): Promise<{ bytes: number; files: number; isDirectory: boolean; name: string }> {
+  return withClient(engine, alias, (client) => withSftp(client, async (sftp) => {
+    const stat = await new Promise<{ isDirectory: () => boolean; size: number; mtime: number; mode: number }>((resolve, reject) => {
+      sftp.stat(remotePath, (error, stats) => error !== undefined ? reject(error) : resolve(stats))
+    })
+    const local = resolvePath(localPath)
+    if (!existsSync(dirname(local))) mkdirSync(dirname(local), { recursive: true })
+    if (!stat.isDirectory()) {
+      await fastGet(sftp, remotePath, local, engine.opts.sftpConcurrency, onProgress)
+      return { bytes: statSync(local).size, files: 1, isDirectory: false, name: basename(remotePath) }
+    }
+    const root = remotePath.replace(/\/+$/, '') || '/'
+    const files = await walkRemoteTree(sftp, root)
+    const baseName = basename(root) || 'download'
+    const out = createWriteStream(local, { mode: 0o600 })
+    const gzip = createGzip()
+    gzip.pipe(out)
+    let transferred = 0
+    const writeAll = async (chunk: Buffer): Promise<void> => {
+      if (!gzip.write(chunk)) {
+        await new Promise<void>(resolve => { gzip.once('drain', () => resolve()) })
+      }
+    }
+    try {
+      for (const rel of files) {
+        const remote = root + '/' + rel
+        const fstat = await new Promise<{ size: number; mtime: number; mode: number }>((resolve, reject) => {
+          sftp.stat(remote, (error, stats) => error !== undefined ? reject(error) : resolve(stats))
+        })
+        onProgress?.({ phase: 'transferring', file: remote, transferred, total: 0, percent: 0 })
+        await writeAll(tarHeader(rel, fstat.size, fstat.mode, Math.floor(fstat.mtime)))
+        await new Promise<void>((resolve, reject) => {
+          const rs = sftp.createReadStream(remote)
+          rs.on('data', (chunk: Buffer) => {
+            if (!gzip.write(chunk)) {
+              rs.pause()
+              gzip.once('drain', () => { try { rs.resume() } catch { /* closed */ } })
+            }
+            transferred += chunk.length
+          })
+          rs.on('error', reject)
+          rs.on('end', resolve)
+        })
+        const pad = fstat.size % 512
+        if (pad > 0) await writeAll(Buffer.alloc(512 - pad))
+      }
+      await writeAll(Buffer.alloc(1024)) // two zero blocks end the archive
+      gzip.end()
+      await new Promise<void>((resolve, reject) => {
+        out.once('finish', resolve)
+        out.once('error', reject)
+      })
+    } catch (error) {
+      try { gzip.destroy() } catch { /* closed */ }
+      throw error
+    }
+    return { bytes: statSync(local).size, files: files.length, isDirectory: true, name: baseName + '.tar.gz' }
+  }))
+}
+
+
+/** Download one remote file to a local path (directories rejected). */
 export async function download(
   engine: PoolEngine,
   alias: string,
@@ -82,13 +157,62 @@ export async function download(
       sftp.stat(remotePath, (error, stats) => error !== undefined ? reject(error) : resolve(stats))
     })
     if (stat.isDirectory()) {
-      throw new Error('\'' + remotePath + '\' is a directory — directory download is not supported yet (download individual files)')
+      throw new Error('\'' + remotePath + '\' is a directory — use the web panel for recursive downloads')
     }
     const local = resolvePath(localPath)
     if (!existsSync(dirname(local))) mkdirSync(dirname(local), { recursive: true })
     await fastGet(sftp, remotePath, local, engine.opts.sftpConcurrency, onProgress)
     return { bytes: statSync(local).size }
   }))
+}
+
+/** Walk a remote directory tree via SFTP, collecting every relative file path. */
+async function walkRemoteTree(sftp: SFTPWrapper, root: string): Promise<string[]> {
+  const files: string[] = []
+  const visit = async (dir: string): Promise<void> => {
+    const list = await new Promise<{ filename: string; attrs: { isDirectory(): boolean; isFile(): boolean } }[]>((resolve, reject) => {
+      sftp.readdir(dir, (error, items) => error !== undefined ? reject(error) : resolve(items))
+    })
+    for (const item of list) {
+      const full = dir.replace(/\/+$/, '') + '/' + item.filename
+      if (item.attrs.isDirectory()) {
+        await visit(full)
+      } else if (item.attrs.isFile()) {
+        files.push(full.slice(root.length + 1))
+      }
+    }
+  }
+  await visit(root)
+  return files
+}
+
+/** One USTAR header block for a regular file (long names via prefix split). */
+function tarHeader(name: string, size: number, mode: number, mtimeSec: number): Buffer {
+  const buf = Buffer.alloc(512)
+  const encoded = Buffer.from(name, 'utf8')
+  if (encoded.length <= 100) {
+    encoded.copy(buf, 0)
+  } else {
+    let split = name.lastIndexOf('/', 155)
+    if (split <= 0) split = 100
+    const prefix = name.slice(0, split)
+    const base = name.slice(split + 1)
+    Buffer.from(prefix, 'utf8').copy(buf, 345)
+    Buffer.from(base, 'utf8').copy(buf, 0)
+  }
+  buf.write('0000644\0', 100, 8)
+  buf.write('0000000\0', 108, 8)
+  buf.write('0000000\0', 116, 8)
+  buf.write(size.toString(8).padStart(11, '0') + '\0', 124, 12)
+  buf.write(mtimeSec.toString(8).padStart(11, '0') + '\0', 136, 12)
+  buf.write('        ', 148, 8) // checksum placeholder
+  buf.write('0', 156, 1) // regular file
+  buf.write('ustar\0', 257, 6)
+  buf.write('00', 263, 2)
+  let sum = 0
+  for (let i = 0; i < 512; i += 1) sum += buf[i]
+  buf.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8)
+  return buf
 }
 
 /** List a remote directory (file browser). */
