@@ -24,6 +24,7 @@ vi.mock('@xterm/xterm', () => ({
     open(): void {}
     dispose(): void {}
     onData(): { dispose(): void } { return { dispose: () => undefined } }
+    onSelectionChange(): { dispose(): void } { return { dispose: () => undefined } }
   },
 }))
 

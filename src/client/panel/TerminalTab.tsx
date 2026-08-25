@@ -5,7 +5,7 @@
  * output stays visible and input is disabled. xterm's stylesheet is injected
  * once per page load (module-level guard).
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
 import { Terminal, type IDisposable } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { SshApi, TerminalConnection } from '../api.ts'
@@ -66,6 +66,12 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   const fitRef = useRef<FitAddon | null>(null)
   const connRef = useRef<TerminalConnection | null>(null)
   const dataSubRef = useRef<IDisposable | null>(null)
+  const selectionSubRef = useRef<IDisposable | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  // Right-click menu on the live terminal: copy (enabled only when xterm has
+  // a selection) and paste (writes the clipboard into the PTY).
+  const [selectionActive, setSelectionActive] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const fontSource = terminalFont ?? NO_FONT_SOURCE
   const fontOverride = useSyncExternalStore(fontSource.subscribe, fontSource.get)
 
@@ -118,14 +124,18 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
       connection.onExit = undefined
       connection.close()
     }
-    // Release the xterm input subscription explicitly and dispose the
-    // terminal so no listener (or the terminal Renderer) survives a
-    // disconnect or the tab unmounting.
+    // Release the xterm subscriptions explicitly and dispose the terminal
+    // so no listener (or the terminal Renderer) survives a disconnect or
+    // the tab unmounting.
     dataSubRef.current?.dispose()
     dataSubRef.current = null
+    selectionSubRef.current?.dispose()
+    selectionSubRef.current = null
     termRef.current?.dispose()
     termRef.current = null
     fitRef.current = null
+    setSelectionActive(false)
+    setContextMenu(null)
   }
 
   // Unmount cleanup (never touches state on an unmounting component).
@@ -190,6 +200,9 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
     connRef.current = connection
     let settled = false
     dataSubRef.current = term.onData(data => { connection.send(data) })
+    // Track xterm's selection so the context menu's copy item can enable
+    // itself only when text is actually selected.
+    selectionSubRef.current = term.onSelectionChange(() => { setSelectionActive(term.hasSelection()) })
     connection.onReady = () => { setStatus({ kind: 'connected', alias: target }) }
     connection.onOutput = data => { term.write(data) }
     connection.onExit = (_code, error) => {
@@ -217,6 +230,72 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
   }
 
   const active = status.kind === 'connecting' || status.kind === 'connected'
+  // A live session only: the menu is pointless while the shell is gone.
+  const sessionLive = connRef.current !== null && termRef.current !== null
+
+  /** Right-click on the live terminal: open the copy/paste menu, no browser menu. */
+  const handleContextMenu = (event: ReactMouseEvent): void => {
+    if (!sessionLive) return
+    event.preventDefault()
+    setContextMenu({
+      x: Math.min(event.clientX, window.innerWidth - 150),
+      y: Math.min(event.clientY, window.innerHeight - 90),
+    })
+  }
+
+  /** Copy the xterm selection into the clipboard. */
+  const copySelection = async (): Promise<void> => {
+    const term = termRef.current
+    if (term === null || !term.hasSelection()) return
+    const text = term.getSelection()
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      fallbackCopy(text)
+    }
+  }
+
+  /** execCommand fallback for environments without the async clipboard API. */
+  const fallbackCopy = (text: string): void => {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try { document.execCommand('copy') } catch { /* clipboard unavailable */ }
+    textarea.remove()
+  }
+
+  /** Paste the clipboard into the remote PTY. */
+  const pasteClipboard = async (): Promise<void> => {
+    const connection = connRef.current
+    if (connection === null) return
+    let text = ''
+    try {
+      text = await navigator.clipboard.readText()
+    } catch {
+      return
+    }
+    if (text !== '') connection.send(text)
+  }
+
+  // Close the context menu on outside mousedown or Escape.
+  useEffect(() => {
+    if (contextMenu === null) return
+    const onDown = (event: MouseEvent): void => {
+      if (menuRef.current !== null && !menuRef.current.contains(event.target as Node)) setContextMenu(null)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [contextMenu])
 
   return (
     <div className={css.termBody}>
@@ -239,12 +318,40 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont }: Termi
         <div className={css.banner} data-kind="info">{tt('terminal.exited', { alias: status.alias })}{status.detail !== undefined ? ' (' + status.detail + ')' : ''}</div>
       )}
       {status.kind === 'error' && <div className={css.banner} data-kind="error">{tt('terminal.error', { error: status.detail })}</div>}
-      <div className={css.termWrap}>
+      <div className={css.termWrap} onContextMenu={handleContextMenu}>
         <div ref={containerRef} className={css.termContainer} data-dsh-part="terminal" />
         {status.kind === 'idle' && (
           <div className={css.termPlaceholder}>{hosts.length === 0 ? tt('hosts.empty') : tt('terminal.placeholder')}</div>
         )}
       </div>
+      {contextMenu !== null && sessionLive && (
+        <div
+          ref={menuRef}
+          className={css.termMenu}
+          role="menu"
+          aria-label={tt('terminal.menu.label')}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={event => { event.preventDefault() }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={css.termMenuItem}
+            disabled={!selectionActive}
+            onClick={() => { setContextMenu(null); void copySelection() }}
+          >
+            {tt('terminal.menu.copy')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={css.termMenuItem}
+            onClick={() => { setContextMenu(null); void pasteClipboard() }}
+          >
+            {tt('terminal.menu.paste')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

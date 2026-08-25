@@ -914,6 +914,42 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   background: var(--dsw-alias-bg-base);
 }
 
+/* --- terminal context menu (copy / paste) -------------------------------------- */
+
+.termMenu {
+  position: fixed;
+  z-index: 40;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.termMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.termMenuItem:hover:not(:disabled) {
+  background: var(--dsw-alias-bg-base);
+}
+
+.termMenuItem:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* --- transfer ----------------------------------------------------------------- */
 
 .hiddenFile {
