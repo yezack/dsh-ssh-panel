@@ -42,47 +42,12 @@ const MAX_RECONNECTS = 3
 const RECONNECT_BASE_MS = 1000
 
 /**
- * Terminal background opacity. 1 = fully opaque theme color, identical to
- * the idle placeholder (the look the user asked to keep). Set < 1 (e.g. 0.7)
- * to let the panel/skin show through behind the terminal.
+ * The terminal background is painted by CSS (.termContainer uses the theme's
+ * --dsw-alias-bg-base, exactly like the idle placeholder), so it always
+ * matches the rest of the panel. xterm itself is fully transparent here;
+ * set the container background to color-mix(in srgb, var(--dsw-alias-bg-base)
+ * 70%, transparent) for a 70% translucent look.
  */
-const TERMINAL_BG_OPACITY = 1
-
-/**
- * The terminal background follows the active theme: resolve the
- * `--dsw-alias-bg-base` token and re-emit it with TERMINAL_BG_OPACITY.
- * getComputedStyle on a probe normalizes var() to a concrete color, and a
- * 1×1 canvas normalizes any color syntax (hex / oklch / named) to rgb() so
- * the alpha can be replaced reliably.
- */
-function terminalThemeBackground(opacity: number): string {
-  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') {
-    return 'rgba(11, 14, 20, ' + opacity + ')'
-  }
-  const probe = document.createElement('div')
-  probe.style.position = 'fixed'
-  probe.style.left = '-9999px'
-  probe.style.background = 'var(--dsw-alias-bg-base)'
-  document.body.appendChild(probe)
-  try {
-    const resolved = getComputedStyle(probe).backgroundColor
-    const canvas = document.createElement('canvas')
-    canvas.width = 1
-    canvas.height = 1
-    const context = canvas.getContext('2d')
-    if (context === null) return 'rgba(11, 14, 20, ' + opacity + ')'
-    context.fillStyle = resolved
-    const normalized = context.fillStyle
-    const match = /^rgba?\(([^)]+)\)$/.exec(normalized)
-    if (match !== null) {
-      const channels = match[1].split(',').map(channel => channel.trim())
-      return 'rgba(' + channels[0] + ', ' + channels[1] + ', ' + channels[2] + ', ' + opacity + ')'
-    }
-  } finally {
-    probe.remove()
-  }
-  return 'rgba(11, 14, 20, ' + opacity + ')'
-}
 
 /** The terminal session lifecycle state shown in the status banner. */
 type SessionStatus = 'connecting' | 'connected' | 'exited'
@@ -309,10 +274,10 @@ export function TerminalTab({ api, presetAlias, requestId, terminalFont, duplica
       cursorBlink: true,
       fontSize: 13,
       fontFamily: resolveTerminalFontFamily(fontOverride),
-      // Semi-transparent terminal background: the active theme's base color
-      // at 70% opacity (allowTransparency enables rgba theme colors).
+      // The terminal is transparent; .termContainer paints the theme's
+      // --dsw-alias-bg-base behind it (identical to the idle placeholder).
       allowTransparency: true,
-      theme: { background: terminalThemeBackground(TERMINAL_BG_OPACITY), foreground: '#d8dee9', cursor: '#a3b8d0' },
+      theme: { background: 'rgba(0, 0, 0, 0)', foreground: '#d8dee9', cursor: '#a3b8d0' },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

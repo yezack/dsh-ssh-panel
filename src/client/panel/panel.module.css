@@ -995,6 +995,11 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
      the drawable area, so padding here would be measured as terminal space
      and clip the bottom line under a global border-box reset. */
   inset: 8px 10px;
+  /* The terminal background: the active theme's base color — the same token
+     the idle placeholder uses, so connected and idle look identical. For a
+     translucent look use:
+     background: color-mix(in srgb, var(--dsw-alias-bg-base) 70%, transparent); */
+  background: var(--dsw-alias-bg-base);
 }
 
 .termPlaceholder {
