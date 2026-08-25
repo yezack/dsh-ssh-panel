@@ -4,7 +4,7 @@
  * passphrase, password) are never pre-filled when editing (the API only
  * exposes the secret-free summary).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SshApi } from '../api.ts'
 import type { HostPayload, SshAuthKind, SshHostSummary } from '../../protocol.ts'
 import { errorMessage, tt } from './helpers.ts'
@@ -90,6 +90,46 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
       .catch(() => { /* picker stays empty; jumps are not free-form */ })
     return () => { disposed = true }
   }, [api])
+
+  // Jump-host combobox state: selected aliases render as tags inside the
+  // input box (el-tag style); typing filters the candidate menu below.
+  const [jumpQuery, setJumpQuery] = useState('')
+  const [jumpOpen, setJumpOpen] = useState(false)
+  const jumpInputRef = useRef<HTMLInputElement | null>(null)
+  const jumpWrapRef = useRef<HTMLDivElement | null>(null)
+
+  const jumpAliases = splitList(form.proxyJump)
+  const jumpSelf = editing?.alias ?? ''
+  const jumpCandidates = allHosts.filter(host => host.alias !== jumpSelf)
+  const jumpAvailable = jumpCandidates.filter(host => !jumpAliases.includes(host.alias))
+  const jumpFiltered = jumpAvailable.filter(host => {
+    const query = jumpQuery.trim().toLowerCase()
+    return query === '' || host.alias.toLowerCase().includes(query) || host.host.toLowerCase().includes(query)
+  })
+
+  const addJump = (alias: string): void => {
+    set('proxyJump', appendToJumpList(form.proxyJump, alias))
+    setJumpQuery('')
+    jumpInputRef.current?.focus()
+    setJumpOpen(true)
+  }
+
+  const removeJump = (alias: string): void => {
+    set('proxyJump', removeFromJumpList(form.proxyJump, alias))
+  }
+
+  // Close the candidate menu on outside mousedown (the box and the menu
+  // share one wrapper, so menu clicks are never treated as outside).
+  useEffect(() => {
+    if (!jumpOpen) return
+    const onDown = (event: MouseEvent): void => {
+      if (jumpWrapRef.current !== null && !jumpWrapRef.current.contains(event.target as Node)) {
+        setJumpOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('mousedown', onDown) }
+  }, [jumpOpen])
 
   // Escape closes the dialog.
   useEffect(() => {
@@ -233,9 +273,9 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
         <label className={css.field}>
           <span className={css.fieldLabel}>{tt('form.proxyJump')}</span>
           <div className={css.jumpPicker}>
-            {splitList(form.proxyJump).length > 0 && (
-              <div className={css.jumpTags}>
-                {splitList(form.proxyJump).map(alias => (
+            <div className={css.jumpBoxWrap} ref={jumpWrapRef}>
+              <div className={css.jumpBox}>
+                {jumpAliases.map(alias => (
                   <span key={alias} className={css.jumpTag}>
                     <span className={css.jumpTagName}>{alias}</span>
                     <button
@@ -243,33 +283,52 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
                       className={css.jumpTagRemove}
                       aria-label={tt('form.proxyJumpRemove', { alias })}
                       title={tt('form.proxyJumpRemove', { alias })}
-                      onClick={() => { set('proxyJump', removeFromJumpList(form.proxyJump, alias)) }}
+                      onClick={() => { removeJump(alias) }}
                     >
                       ×
                     </button>
                   </span>
                 ))}
+                <input
+                  ref={jumpInputRef}
+                  className={css.jumpInput}
+                  value={jumpQuery}
+                  placeholder={jumpAliases.length === 0 ? tt('form.proxyJumpSelect') : ''}
+                  aria-label={tt('form.proxyJumpSelect')}
+                  onFocus={() => { setJumpOpen(true) }}
+                  onChange={event => { setJumpQuery(event.target.value); setJumpOpen(true) }}
+                  onKeyDown={event => {
+                    if (event.key === 'Escape') setJumpOpen(false)
+                    else if (event.key === 'Backspace' && jumpQuery === '' && jumpAliases.length > 0) {
+                      removeJump(jumpAliases[jumpAliases.length - 1] as string)
+                    }
+                  }}
+                />
               </div>
-            )}
-            {allHosts.some(host => host.alias !== (editing?.alias ?? '') && !splitList(form.proxyJump).includes(host.alias)) ? (
-              <select
-                className={css.input}
-                value=""
-                aria-label={tt('form.proxyJumpSelect')}
-                onChange={event => { set('proxyJump', appendToJumpList(form.proxyJump, event.target.value)) }}
-              >
-                <option value="">{tt('form.proxyJumpSelect')}</option>
-                {allHosts
-                  .filter(host => host.alias !== (editing?.alias ?? '') && !splitList(form.proxyJump).includes(host.alias))
-                  .map(host => (
-                    <option key={host.alias} value={host.alias}>{host.alias} ({host.host})</option>
+              {jumpOpen && jumpFiltered.length > 0 && (
+                <div className={css.jumpMenu} role="listbox" aria-label={tt('form.proxyJumpSelect')}>
+                  {jumpFiltered.map(host => (
+                    <button
+                      key={host.alias}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      className={css.jumpOption}
+                      onMouseDown={event => { event.preventDefault() }}
+                      onClick={() => { addJump(host.alias) }}
+                    >
+                      <span className={css.jumpOptionName}>{host.alias}</span>
+                      <span className={css.jumpOptionHost}>{host.host}</span>
+                    </button>
                   ))}
-              </select>
-            ) : (
-              splitList(form.proxyJump).length === 0 && <span className={css.hint}>{tt('form.proxyJumpEmpty')}</span>
+                </div>
+              )}
+            </div>
+            {jumpCandidates.length === 0 && jumpAliases.length === 0 && (
+              <span className={css.hint}>{tt('form.proxyJumpEmpty')}</span>
             )}
+            <span className={css.hint}>{tt('form.proxyJumpHint')}</span>
           </div>
-          <span className={css.hint}>{tt('form.proxyJumpHint')}</span>
         </label>
         <div className={css.formRow}>
           <label className={css.field}>

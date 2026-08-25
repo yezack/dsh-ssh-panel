@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * HostFormDialog jump-host picker: candidates come from the saved host list
- * (dropdown, self excluded), the selected chain renders as removable tags
- * (× removes one hop), and the chain is saved in selection order.
+ * HostFormDialog jump-host picker: selected aliases render as el-tag style
+ * tags INSIDE the input box (self excluded); typing filters the candidate
+ * menu, picking appends a tag, × removes one hop, and the chain is saved in
+ * selection order.
  */
 
 import { act } from 'react'
@@ -34,7 +35,7 @@ function makeHost(alias: string): SshHostSummary {
 }
 
 describe('HostFormDialog jump-host picker', () => {
-  it('picks from the dropdown into removable tags and saves the chain order', async () => {
+  it('renders tags inside the input box, picks from the menu and removes hops', async () => {
     const updateHost = vi.fn(async (_alias: string, _payload: unknown) => makeHost('web-1'))
     const api = {
       listHosts: vi.fn(async () => [makeHost('bastion'), makeHost('db-1'), makeHost('web-1')]),
@@ -49,38 +50,44 @@ describe('HostFormDialog jump-host picker', () => {
     })
     await act(async () => { await Promise.resolve() })
 
-    // Dropdown offers the remaining saved hosts: already-selected aliases
-    // (bastion, prefilled) and the edited host itself (web-1) are excluded.
-    const select = container.querySelector('select[aria-label="选择跳板机…"]') as HTMLSelectElement
-    const options = [...select.querySelectorAll('option')].map(option => option.value)
-    expect(options).not.toContain('bastion')
-    expect(options).toContain('db-1')
-    expect(options).not.toContain('web-1')
-
-    // The prefilled chain renders as a removable tag.
-    const removeButtons = [...container.querySelectorAll('button[class*="jumpTagRemove"]')] as HTMLButtonElement[]
-    expect(removeButtons).toHaveLength(1)
-    expect(container.textContent).toContain('bastion')
-
-    // Pick db-1 from the dropdown: chain becomes bastion, db-1, and with
-    // every candidate selected the dropdown disappears.
+    // The prefilled chain renders as a tag INSIDE the input box.
+    const box = container.querySelector('[class*="jumpBox"]') as HTMLElement
+    const input = box.querySelector('input') as HTMLInputElement
+    expect(box.textContent).toContain('bastion')
+    expect([...box.querySelectorAll('button[class*="jumpTagRemove"]')]).toHaveLength(1)
+    // The edited host itself is not offered by the menu.
     await act(async () => {
-      select.value = 'db-1'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.focus()
     })
-    let tagsAfterPick = [...container.querySelectorAll('button[class*="jumpTagRemove"]')]
-    expect(tagsAfterPick).toHaveLength(2)
-    expect(container.querySelector('select')).toBeNull()
+    const menuNames = [...container.querySelectorAll('button[class*="jumpOption"] span:first-child')].map(el => el.textContent)
+    expect(menuNames).toContain('db-1')
+    expect(menuNames).not.toContain('bastion')
+    expect(menuNames).not.toContain('web-1')
 
-    // Remove the first hop: chain becomes db-1 only, dropdown returns with
-    // the freed candidate.
-    await act(async () => { (tagsAfterPick[0] as HTMLButtonElement).click() })
-    const tagNames = [...container.querySelectorAll('span[class*="jumpTagName"]')].map(el => el.textContent)
+    // Type to filter and pick db-1: a second tag appears inside the box and
+    // the input is cleared.
+    await act(async () => {
+      input.value = 'db'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const options = [...container.querySelectorAll('button[class*="jumpOption"]')] as HTMLButtonElement[]
+    expect(options).toHaveLength(1)
+    expect(options[0]!.textContent).toContain('db-1')
+    await act(async () => { options[0]!.click() })
+    expect(box.textContent).toContain('db-1')
+    expect((box.querySelector('input') as HTMLInputElement).value).toBe('')
+    // Every candidate is now selected: the menu closes.
+    expect(container.querySelector('[class*="jumpMenu"]')).toBeNull()
+
+    // Remove the first hop: chain becomes db-1 only.
+    let removes = [...box.querySelectorAll('button[class*="jumpTagRemove"]')]
+    await act(async () => { (removes[0] as HTMLButtonElement).click() })
+    const tagNames = [...box.querySelectorAll('span[class*="jumpTagName"]')].map(el => el.textContent)
     expect(tagNames).toEqual(['db-1'])
-    tagsAfterPick = [...container.querySelectorAll('button[class*="jumpTagRemove"]')]
-    expect(tagsAfterPick).toHaveLength(1)
-    const selectAgain = container.querySelector('select') as HTMLSelectElement
-    expect([...selectAgain.querySelectorAll('option')].map(option => option.value)).toContain('bastion')
+    removes = [...box.querySelectorAll('button[class*="jumpTagRemove"]')]
+    expect(removes).toHaveLength(1)
 
     const save = [...container.querySelectorAll('button')].find(button => button.textContent === '保存') as HTMLButtonElement
     await act(async () => { save.click() })
